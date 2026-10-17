@@ -124,3 +124,77 @@ export async function seedDemoTenant(tx: Tx, password: string = PUBLIC_DEMO_PASS
     await tx.query(`INSERT INTO sales_customer_assignments (tenant_id, customer_id, sales_rep_id) VALUES ($1, $2, $3)`, [tenantId, c, rep]);
   }
 }
+
+/**
+ * POS demo data for the demo company: cashier and supervisor logins, a
+ * register on the head office, a product category with barcodes, a product
+ * with sizes and a serial-numbered product. Safe to run again (it only adds
+ * what is missing), so `pnpm db:seed` brings an existing demo database up to date.
+ */
+export async function seedDemoPos(tx: Tx, password: string = PUBLIC_DEMO_PASSWORD) {
+  const t = await tx.maybeOne<{ id: string }>(`SELECT id FROM tenants WHERE code = 'demo'`);
+  if (!t) return;
+  const tenantId = t.id;
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
+  await tx.query(
+    `INSERT INTO tenant_modules (tenant_id, module_code, enabled) VALUES ($1, 'POS_SALES', true)
+     ON CONFLICT (tenant_id, module_code) DO UPDATE SET enabled = true`,
+    [tenantId],
+  );
+  if (await tx.maybeOne(`SELECT 1 FROM pos_registers WHERE code = 'R1'`)) return;
+  const id = (sql: string, p: unknown[] = []) => tx.one<{ id: string }>(sql, p).then((r) => r.id);
+  const pw = await bcrypt.hash(password, 10);
+  const branch = await id(`SELECT id FROM branches WHERE code = 'HQ'`);
+  const wh = await id(`SELECT id FROM warehouses WHERE code = 'MAIN'`);
+  const user = async (email: string, name: string, roleCode: string, pin?: string) => {
+    const existing = await tx.maybeOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [email]);
+    const uid =
+      existing?.id ??
+      (await id(`INSERT INTO users (tenant_id, email, password_hash, full_name, pos_pin_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [
+        tenantId, email, pw, name, pin ? await bcrypt.hash(pin, 10) : null,
+      ]));
+    await tx.query(
+      `INSERT INTO user_roles (tenant_id, user_id, role_id) SELECT $1, $2, id FROM roles WHERE code = $3 ON CONFLICT DO NOTHING`,
+      [tenantId, uid, roleCode],
+    );
+    await tx.query(`INSERT INTO pos_staff_branches (tenant_id, user_id, branch_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [tenantId, uid, branch]);
+    return uid;
+  };
+  await user('cashier@demo.ckh.one', 'Sreyneang Cashier', 'POS_CASHIER');
+  await user('possupervisor@demo.ckh.one', 'Bopha Supervisor', 'POS_SUPERVISOR', '2468');
+  await user('posmanager@demo.ckh.one', 'Visal POS Manager', 'POS_MANAGER', '1357');
+  await tx.query(
+    `INSERT INTO pos_registers (tenant_id, code, name, branch_id, warehouse_id) VALUES ($1, 'R1', 'Front counter', $2, $3)`,
+    [tenantId, branch, wh],
+  );
+
+  const pcs = await id(`SELECT id FROM units WHERE code = 'PCS'`);
+  const cat = async (code: string, name: string) =>
+    (await tx.maybeOne<{ id: string }>('SELECT id FROM product_categories WHERE code = $1', [code]))?.id ??
+    id(`INSERT INTO product_categories (tenant_id, code, name) VALUES ($1, $2, $3) RETURNING id`, [tenantId, code, name]);
+  const grocery = await cat('GROCERY', 'Grocery');
+  const drinks = await cat('DRINKS', 'Drinks');
+  const apparel = await cat('APPAREL', 'Apparel');
+  const phones = await cat('PHONES', 'Phones');
+  // Barcodes and categories on the existing demo products.
+  for (const [sku, barcode, c] of [['RICE-25', '8850001000017', grocery], ['OIL-1L', '8850001000024', grocery], ['SUGAR-1', '8850001000031', grocery], ['WATER-24', '8850001000048', drinks]]) {
+    await tx.query(`UPDATE products SET barcode = COALESCE(barcode, $2), category_id = COALESCE(category_id, $3), reorder_point = COALESCE(reorder_point, 20) WHERE sku = $1`, [sku, barcode, c]);
+  }
+  const product = async (sku: string, name: string, price: string, extra: { barcode?: string; category: string; parent?: string; attrs?: object; serial?: boolean; stock?: number }) => {
+    const p = await id(
+      `INSERT INTO products (tenant_id, sku, barcode, name, category_id, base_unit_id, list_price, cost_price, parent_product_id, variant_attributes, serial_tracked, reorder_point)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $7::numeric * 0.6, $8, $9, $10, 5) RETURNING id`,
+      [tenantId, sku, extra.barcode ?? null, name, extra.category, pcs, price, extra.parent ?? null, extra.attrs ? JSON.stringify(extra.attrs) : null, !!extra.serial],
+    );
+    if (extra.stock !== undefined) {
+      await tx.query(`INSERT INTO stock_levels (tenant_id, warehouse_id, product_id, qty_on_hand, avg_cost) VALUES ($1, $2, $3, $4, $5::numeric * 0.6)`, [tenantId, wh, p, extra.stock, price]);
+    }
+    return p;
+  };
+  await product('COFFEE-ICED', 'Iced Coffee', '1.50', { barcode: '8850001000055', category: drinks, stock: 200 });
+  const tee = await product('TEE', 'CKH T-shirt', '8.00', { category: apparel });
+  for (const [i, [size, colour, n]] of ([['S', 'White', 12], ['M', 'White', 20], ['L', 'White', 3], ['M', 'Black', 15]] as const).entries()) {
+    await product(`TEE-${size}-${colour[0]}`, `CKH T-shirt ${size} ${colour}`, '8.00', { barcode: `885000200000${i + 1}`, category: apparel, parent: tee, attrs: { size, colour }, stock: n });
+  }
+  await product('PHONE-A1', 'Smartphone A1', '149.00', { barcode: '8850003000019', category: phones, serial: true, stock: 10 });
+}

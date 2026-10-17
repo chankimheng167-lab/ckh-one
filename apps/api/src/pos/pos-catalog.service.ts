@@ -66,19 +66,21 @@ export class PosCatalogService {
     const today = tx.today();
     for (const r of rows) {
       if (r.variant_count > 0) {
-        const range = await tx.one<{ min: string | null; max: string | null; available: string | null }>(
+        const range = await tx.one<{ min: string | null; max: string | null; available: string | null; low: boolean | null }>(
           `SELECT min(v.list_price) AS min, max(v.list_price) AS max,
-                  sum(GREATEST(COALESCE(s.qty_on_hand, 0) - COALESCE(s.qty_reserved, 0), 0)) AS available
+                  sum(GREATEST(COALESCE(s.qty_on_hand, 0) - COALESCE(s.qty_reserved, 0), 0)) AS available,
+                  bool_or(v.track_inventory AND v.reorder_point IS NOT NULL AND COALESCE(s.qty_on_hand, 0) <= v.reorder_point) AS low
              FROM products v LEFT JOIN stock_levels s ON s.product_id = v.id AND s.warehouse_id = $2
             WHERE v.parent_product_id = $1 AND v.status = 'ACTIVE' AND v.is_sellable`,
           [r.id, reg.warehouse_id],
         );
-        Object.assign(r, { price: null, price_from: range.min, price_to: range.max, available: range.available ?? '0', currency: pctx.currency });
+        // A variant's list price is shown as a range; the real price per variant comes from the product endpoint.
+        Object.assign(r, { price: null, price_from: range.min, price_to: range.max, available: range.available ?? '0', currency: pctx.currency, low_stock: !!range.low });
       } else {
         const price = await this.pricing.resolve(tx, pctx, r.id, null, '1', today);
         Object.assign(r, { price: px(price.unitPrice), price_source: price.priceSource, tax_rate_percent: price.taxRatePercent, currency: pctx.currency });
+        r.low_stock = this.isLow(r);
       }
-      r.low_stock = this.isLow(r);
     }
     return { registerId: reg.id, warehouseId: reg.warehouse_id, stockAsOf: new Date().toISOString(), items: rows };
   }

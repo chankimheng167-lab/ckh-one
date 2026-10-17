@@ -159,6 +159,15 @@ export class PosSalesService {
     }
     const allSerials = lines.flatMap((l) => l.serialNumbers.map((s) => `${l.productId}:${s.toLowerCase()}`));
     if (new Set(allSerials).size !== allSerials.length) throw new DomainError('SERIAL_DUPLICATE', 'The same serial number is entered twice', 422);
+    if (allSerials.length && !offline) {
+      // Caught here so the till shows it while the cart is built; checkout re-checks under the unique index.
+      const sold = await tx.maybeOne<{ serial_no: string; name: string }>(
+        `SELECT s.serial_no, p.name FROM pos_sold_serials s JOIN products p ON p.id = s.product_id
+          WHERE NOT s.returned AND (s.product_id::text || ':' || lower(s.serial_no)) = ANY($1::text[]) LIMIT 1`,
+        [allSerials],
+      );
+      if (sold) throw conflict('SERIAL_ALREADY_SOLD', `Serial ${sold.serial_no} of ${sold.name} is already sold`);
+    }
 
     const cart = pricePosCart({
       currency: pricing.currency,

@@ -76,7 +76,12 @@ CREATE TABLE pos_payment_methods (
   UNIQUE (tenant_id, id),
   FOREIGN KEY (tenant_id, account_id) REFERENCES chart_of_accounts (tenant_id, id),
   -- Only cash can be taken offline: nothing else can be confirmed without the server.
-  CHECK (NOT allow_offline OR kind = 'CASH')
+  CHECK (NOT allow_offline OR kind = 'CASH'),
+  -- Bank transfers and QR payments are never taken on the cashier's word: no
+  -- provider integration confirms them yet, so they always wait for verification.
+  CHECK (kind NOT IN ('BANK_TRANSFER', 'QR') OR (requires_reference AND requires_verification)),
+  -- Card payments need the terminal's approval code.
+  CHECK (kind <> 'CARD' OR requires_reference)
 );
 
 -- ---------------------------------------------------------------------------
@@ -358,7 +363,8 @@ CREATE TABLE pos_sold_serials (
   FOREIGN KEY (tenant_id, product_id) REFERENCES products (tenant_id, id),
   FOREIGN KEY (tenant_id, sale_line_id) REFERENCES pos_sale_lines (tenant_id, id)
 );
-CREATE UNIQUE INDEX pos_sold_serials_out_uq ON pos_sold_serials (tenant_id, product_id, serial_no) WHERE NOT returned;
+-- A serial is sold once (case-insensitive) until it comes back on a return.
+CREATE UNIQUE INDEX pos_sold_serials_out_uq ON pos_sold_serials (tenant_id, product_id, lower(serial_no)) WHERE NOT returned;
 
 ALTER TABLE products
   ADD COLUMN serial_tracked boolean NOT NULL DEFAULT false,

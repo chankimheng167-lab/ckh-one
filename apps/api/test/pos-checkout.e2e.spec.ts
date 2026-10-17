@@ -203,6 +203,21 @@ describe('POS split payments', () => {
     expect(dup.status).toBe(409);
     expect(dup.body.error.code).toBe('DUPLICATE');
   });
+
+  it('never lets a bank or QR method skip verification, or a card method skip the approval code', async () => {
+    const admin = api.as(co.tokens.admin);
+    const qr = await admin.post('/pos/admin/payment-methods', { code: 'ABA_QR', name: 'ABA QR', kind: 'QR', requiresReference: true, requiresVerification: false });
+    expect(qr.status).toBe(422);
+    expect(qr.body.error.code).toBe('VERIFICATION_REQUIRED');
+    const off = await admin.put(`/pos/admin/payment-methods/${co.pos.methods.KHQR}`, { requiresVerification: false });
+    expect(off.body.error.code).toBe('VERIFICATION_REQUIRED');
+    const card = await admin.put(`/pos/admin/payment-methods/${co.pos.methods.CARD}`, { requiresReference: false });
+    expect(card.body.error.code).toBe('REFERENCE_REQUIRED');
+    const offline = await admin.put(`/pos/admin/payment-methods/${co.pos.methods.CARD}`, { allowOffline: true });
+    expect(offline.body.error.code).toBe('OFFLINE_CASH_ONLY');
+    // The database holds the same line if the API is bypassed.
+    await expect(sql(`UPDATE pos_payment_methods SET requires_verification = false WHERE id = $1`, [co.pos.methods.KHQR])).rejects.toThrow(/check constraint/);
+  });
 });
 
 describe('POS duplicate transaction prevention', () => {
@@ -282,6 +297,10 @@ describe('POS catalogue, variants, serials and held sales', () => {
     const again = await cashier().post('/pos/sales', sale([{ productId: phone, quantity: '1', serialNumbers: ['SN-1'] }], [cash('110')]));
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('SERIAL_ALREADY_SOLD');
+    // The till learns it while building the cart (any letter case), before taking payment.
+    const quote = await cashier().post('/pos/quote', { registerId: co.pos.registerId, lines: [{ productId: phone, quantity: '1', serialNumbers: ['sn-1'] }] });
+    expect(quote.status).toBe(409);
+    expect(quote.body.error.code).toBe('SERIAL_ALREADY_SOLD');
   });
 
   it('holds a cart, lists it, resumes it once and cancels another', async () => {

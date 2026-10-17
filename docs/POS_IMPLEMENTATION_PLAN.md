@@ -121,8 +121,8 @@ the API; menus only hide what the API would refuse anyway.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Audit, database design, architecture, shared POS money logic | ✅ |
-| 2 | POS backend: registers, catalogue, checkout transaction, permissions, inventory | see below |
-| 3 | Touchscreen POS screen and payment workflow | |
+| 2 | POS backend: registers, catalogue, checkout transaction, permissions, inventory | ✅ |
+| 3 | Touchscreen POS screen and payment workflow | ✅ |
 | 4 | Receipts, returns/refunds, shifts, reports | |
 | 5 | Accounting integration and reconciliation | |
 | 6 | Windows desktop POS and hardware | |
@@ -135,3 +135,39 @@ the API; menus only hide what the API would refuse anyway.
   settlement, proportional refunds, card-number guard. 14 unit tests.
 - `0009_pos_sales.sql` applied cleanly to an empty database and RLS re-applied.
 - POS permissions, roles and the `POS_SALES` module in `@ckh/shared`; new companies are provisioned with POS defaults.
+
+### Phase 2 — done
+- APIs under `/pos`: context, catalogue (search, categories, variants, barcode/pack/SKU scan), customers (search, quick add),
+  quote, checkout, sales history and details, held sales, approvers, approval PIN, dashboard; `/pos/shifts` (open, cash
+  in/out, close with blind count and over/short journal, supervisor approval); `/pos/admin` (registers with licence
+  limits, settings, payment methods, staff branches, licence usage). Super Admin: `GET/PUT /platform/tenants/:id/pos-license`,
+  `GET /platform/pos/usage`.
+- Checkout is one transaction: server pricing, discount/price-override limits with supervisor PIN, split payments
+  (change only from cash, no non-cash overpayment, card numbers refused), stock row locks, serials, drawer movement and one
+  balanced `POS_SALE` journal (payments, revenue, discounts, VAT, COGS/inventory). Idempotent on `clientSaleId`.
+- Bank transfer and QR methods must carry a reference and wait for verification; card methods need the approval code
+  (enforced by the API and by CHECK constraints).
+- 28 end-to-end tests in `apps/api/test/pos-checkout.e2e.spec.ts`.
+- Upgrade path checked: a database at the previous release with the demo company and a stock reservation migrated to
+  `0009` cleanly; the old `POS` module flag carried over to `POS_SALES`.
+
+### Phase 3 — done
+- Web POS at `/pos/` (static export, same PWA, Theme Studio colours): full-screen touch layout with header (company logo,
+  branch, register, cashier, shift, online/offline, clock) and bottom bar (New sale, Held sales, Sales history, Returns,
+  Cash shifts, Settings).
+- Till (`/pos/sell/`): category chips, search, product grid with images, stock and low-stock badges; keyboard-wedge
+  barcode capture (Enter/Tab suffix per register); variant picker; serial-number entry; line sheet (quantity, % or amount
+  discount, price override by permission); order discount; customer search and quick add; hold; cancel. Every change is
+  priced by `POST /pos/quote`; the till shows server totals only.
+- Payment sheet: cash with quick-tender buttons and change, card with approval code, KHQR and bank transfer flagged as
+  “verified later”, split tenders, supervisor PIN approval prompt, retry-safe (same client sale id after a network error).
+- Pages: POS dashboard, product catalog, held sales, sales history, sale details, cash shifts (open, cash in/out, blind
+  close with denomination count, approve), shift report, cash movements, registers and staff branches, printer/hardware
+  settings per register, POS settings (rules, ledger accounts, payment methods, own PIN), menu.
+- Demo data: `pnpm --filter @ckh/api db:seed` adds POS users (`cashier@demo.ckh.one`, `possupervisor@demo.ckh.one` PIN
+  2468, `posmanager@demo.ckh.one` PIN 1357), register R1, categories, barcodes, a T-shirt with sizes and a serial-numbered
+  phone to the demo company (also on an existing demo database).
+- Browser run-through (Playwright, Chromium, 1366×768 and 800×1100): sign in as cashier, open shift, tap products, scan a
+  barcode, pick a variant, enter a serial, discount above the cashier limit, split card + cash payment with supervisor PIN,
+  sale details, hold and resume, cash out, close shift. All steps passed.
+- The web till is online-only by design; offline selling is the Windows app (phase 7). Receipts print in phase 4.

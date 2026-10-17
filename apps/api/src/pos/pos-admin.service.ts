@@ -186,8 +186,17 @@ export class PosAdminService {
     return after;
   }
 
+  /** Rules every payment method must keep (the database enforces them too). */
+  private checkMethod(kind: string, allowOffline: boolean, requiresReference: boolean, requiresVerification: boolean) {
+    if (allowOffline && kind !== 'CASH') throw new DomainError('OFFLINE_CASH_ONLY', 'Only cash can be accepted offline', 422);
+    if ((kind === 'BANK_TRANSFER' || kind === 'QR') && !(requiresReference && requiresVerification)) {
+      throw new DomainError('VERIFICATION_REQUIRED', 'Bank transfer and QR payments must have a reference and be verified before they count as paid', 422);
+    }
+    if (kind === 'CARD' && !requiresReference) throw new DomainError('REFERENCE_REQUIRED', 'Card payments need the terminal approval code', 422);
+  }
+
   async createPaymentMethod(tx: Tx, i: z.infer<typeof PaymentMethodInput>) {
-    if (i.allowOffline && i.kind !== 'CASH') throw new DomainError('OFFLINE_CASH_ONLY', 'Only cash can be accepted offline', 422);
+    this.checkMethod(i.kind, i.allowOffline, i.requiresReference, i.requiresVerification);
     const m = await tx.one(
       `INSERT INTO pos_payment_methods (tenant_id, code, name, kind, requires_reference, requires_verification, provider, account_id, allow_offline, sort_order, is_active)
        VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
@@ -202,7 +211,7 @@ export class PosAdminService {
     if (!b) throw notFound('Payment method');
     const kind = i.kind ?? b.kind;
     const allowOffline = i.allowOffline ?? b.allow_offline;
-    if (allowOffline && kind !== 'CASH') throw new DomainError('OFFLINE_CASH_ONLY', 'Only cash can be accepted offline', 422);
+    this.checkMethod(kind, allowOffline, i.requiresReference ?? b.requires_reference, i.requiresVerification ?? b.requires_verification);
     const a = await tx.one(
       `UPDATE pos_payment_methods SET code = $2, name = $3, kind = $4, requires_reference = $5, requires_verification = $6, provider = $7,
               account_id = $8, allow_offline = $9, sort_order = $10, is_active = $11 WHERE id = $1 RETURNING *`,
