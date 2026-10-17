@@ -153,7 +153,7 @@ export class OrdersService {
   // Submit: full server-side revalidation, then auto-approve or route
   // -------------------------------------------------------------------------
 
-  async submit(tx: Tx, user: TenantUser, orderId: string) {
+  async submit(tx: Tx, user: TenantUser, orderId: string, opts: { deviceGrandTotal?: string } = {}) {
     const order = await this.lockForEdit(tx, user, orderId);
     const settings = await this.ctx.settings(tx);
     const rep = await tx.one<SalesRep>('SELECT * FROM sales_representatives WHERE id = $1', [order.sales_rep_id]);
@@ -207,8 +207,10 @@ export class OrdersService {
       },
       limits,
     );
-    if (order.is_provisional && priceChanged) {
-      requirements.push({ reason: 'OFFLINE_PRICE_CHANGE', level: 1, detail: `Offline total ${order.grand_total} revalidated to ${built.grandTotal}` });
+    // An offline order whose total differs from what the device showed the customer needs a supervisor's OK.
+    const offlineTotal = opts.deviceGrandTotal ?? (order.is_provisional ? order.grand_total : undefined);
+    if (order.is_provisional && offlineTotal !== undefined && !new Decimal(built.grandTotal).eq(offlineTotal)) {
+      requirements.push({ reason: 'OFFLINE_PRICE_CHANGE', level: 1, detail: `Offline total ${offlineTotal} revalidated to ${built.grandTotal}` });
     }
 
     const deliveryAddress = order.delivery_address_id

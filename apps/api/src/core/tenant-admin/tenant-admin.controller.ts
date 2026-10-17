@@ -54,6 +54,7 @@ const SalesSettingsInput = z.object({
   allowBackorders: z.boolean().optional(),
   showBalancesToReps: z.boolean().optional(),
   visitLocationCapture: z.enum(['OFF', 'ASK', 'REQUIRED']).optional(),
+  offlineCatalogMaxAgeHours: z.number().int().min(1).max(720).optional(),
 });
 
 @Controller('admin')
@@ -181,6 +182,7 @@ export class TenantAdminController {
            allow_backorders = COALESCE($4, allow_backorders),
            show_balances_to_reps = COALESCE($5, show_balances_to_reps),
            visit_location_capture = COALESCE($6, visit_location_capture),
+           offline_catalog_max_age_hours = COALESCE($7, offline_catalog_max_age_hours),
            updated_at = now()
          WHERE tenant_id = current_tenant_id() RETURNING *`,
         [
@@ -190,6 +192,7 @@ export class TenantAdminController {
           i.allowBackorders ?? null,
           i.showBalancesToReps ?? null,
           i.visitLocationCapture ?? null,
+          i.offlineCatalogMaxAgeHours ?? null,
         ],
       );
       await this.audit.record(tx, { action: 'SALES_SETTINGS_UPDATED', entityType: 'sales_settings', before, after });

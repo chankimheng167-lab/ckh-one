@@ -42,6 +42,9 @@ import { QuotationsService } from './sales/quotations/quotations.service';
 import { TargetsService } from './sales/targets/targets.service';
 import { TerritoriesService } from './sales/territories/territories.service';
 import { VisitsService } from './sales/visits/visits.service';
+import { SyncController } from './sales/sync/sync.controller';
+import { SyncService } from './sales/sync/sync.service';
+import { ThemeController } from './core/theme/theme.controller';
 
 @Global()
 @Module({
@@ -81,6 +84,8 @@ export class CoreInfraModule {}
     TargetsController,
     CommissionsController,
     PayrollHandoffController,
+    SyncController,
+    ThemeController,
     AccountingController,
   ],
   providers: [
@@ -99,6 +104,7 @@ export class CoreInfraModule {}
     VisitsService,
     TerritoriesService,
     QuotationsService,
+    SyncService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

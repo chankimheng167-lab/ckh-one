@@ -4,3 +4,4 @@ export * from './order-workflow';
 export * from './pricing';
 export * from './approval-policy';
 export * from './commission';
+export * from './theme';
