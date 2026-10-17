@@ -47,7 +47,7 @@ const TONE: Record<string, string> = {
   PLANNED: 'info', IN_PROGRESS: 'warn', COMPLETED: 'ok', MISSED: 'bad', PENDING_VERIFICATION: 'warn', VERIFIED: 'ok',
   SENT: 'info', ACCEPTED: 'ok', EXPIRED: 'bad', CONVERTED: 'ok', ESTIMATED: 'warn', SENT_TO_PAYROLL: 'info', PAID: 'ok',
   PENDING: 'warn', SYNCING: 'info', ACCEPTED_WITH_CHANGES: 'warn', CONFLICT: 'bad', ISSUED: 'info', PARTIALLY_PAID: 'warn',
-  REQUESTED: 'warn', RECEIVED: 'ok',
+  REQUESTED: 'warn', RECEIVED: 'ok', TRIAL: 'info', ACTIVE: 'ok', PAST_DUE: 'warn', SUSPENDED: 'bad',
 };
 export const Status = ({ s }: { s: string | null | undefined }) => (s ? <span className={`badge ${TONE[s] ?? ''}`}>{human(s)}</span> : null);
 

@@ -68,7 +68,9 @@ pnpm dev                            # http://localhost:3100
 pnpm build
 ```
 
-Sign in with company code `demo` and one of the demo logins above. The app is a static export, so it can be hosted on any static host; set `CORS_ORIGINS` on the API to the app's origin. Offline ordering needs the **Offline Mobile Ordering** module on the tenant.
+Sign in with company code `demo` and one of the demo logins above. The Super Admin (platform owner) signs in at
+`http://localhost:3100/platform/` with `superadmin@ckh.one` to create client companies and switch their modules,
+subscription and status. The app is a static export, so it can be hosted on any static host; set `CORS_ORIGINS` on the API to the app's origin. Offline ordering needs the **Offline Mobile Ordering** module on the tenant.
 
 **Never run the API with the database owner or a superuser account.** Superusers bypass row-level security, and the app login must not be able to change the schema.
 
