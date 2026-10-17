@@ -27,8 +27,10 @@ docs/                  architecture notes and implementation status
 ## First run
 
 The quickest way to get PostgreSQL is Docker: `docker compose up -d` starts PostgreSQL 16 on
-`localhost:5432` with user `postgres`, password `postgres` and database `ckh_one` already created
-(skip step 1 below). Use `postgres://postgres:postgres@localhost:5432/...` in the URLs.
+**`localhost:5433`** (not 5432, so it never clashes with another local Postgres) with user
+`postgres`, password `postgres` and database `ckh_one` already created (skip step 1 below).
+Use `postgres://postgres:postgres@localhost:5433/...` in the URLs, and for tests set
+`TEST_PG_ADMIN_URL=postgres://postgres:postgres@localhost:5433/postgres`.
 
 ```bash
 pnpm install

@@ -1,5 +1,5 @@
 # Local development database for CKH ONE.
-#   docker compose up -d      start PostgreSQL 16 on localhost:5432
+#   docker compose up -d      start PostgreSQL 16 on localhost:5433
 #   docker compose down       stop it (data is kept in the ckh-pgdata volume)
 #   docker compose down -v    stop it and delete all data
 services:
@@ -11,7 +11,7 @@ services:
       POSTGRES_DB: ckh_one
       TZ: UTC
     ports:
-      - "5432:5432"
+      - "5433:5432"   # 5433 on your PC, so it never clashes with another local Postgres
     volumes:
       - ckh-pgdata:/var/lib/postgresql/data
     healthcheck:
