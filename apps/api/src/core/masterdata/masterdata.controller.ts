@@ -42,6 +42,8 @@ const CreateCustomer = z.object({
         line1: z.string().min(1).max(300),
         line2: z.string().max(300).optional(),
         locationId: uuid.optional(),
+        latitude: z.number().min(-90).max(90).optional(),
+        longitude: z.number().min(-180).max(180).optional(),
         isDefault: z.boolean().default(false),
       }),
     )
@@ -128,9 +130,9 @@ export class MasterDataController {
       );
       for (const a of i.addresses) {
         await tx.query(
-          `INSERT INTO customer_addresses (tenant_id, customer_id, address_type, label, line1, line2, location_id, is_default)
-           VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7)`,
-          [c.id, a.addressType, a.label ?? null, a.line1, a.line2 ?? null, a.locationId ?? null, a.isDefault],
+          `INSERT INTO customer_addresses (tenant_id, customer_id, address_type, label, line1, line2, location_id, is_default, latitude, longitude)
+           VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [c.id, a.addressType, a.label ?? null, a.line1, a.line2 ?? null, a.locationId ?? null, a.isDefault, a.latitude ?? null, a.longitude ?? null],
         );
       }
       await this.audit.record(tx, { action: 'CUSTOMER_CREATED', entityType: 'customer', entityId: c.id, after: { ...c, creditLimit: i.creditLimit } });

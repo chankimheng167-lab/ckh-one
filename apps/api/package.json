@@ -20,6 +20,8 @@
     "@nestjs/platform-express": "^10.4.6",
     "bcryptjs": "^2.4.3",
     "decimal.js": "^10.4.3",
+    "exceljs": "4.4.0",
+    "pdfkit": "0.17.2",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
@@ -32,6 +34,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.9.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.2",
     "jest": "^29.7.0",
@@ -47,14 +50,23 @@
         "@swc/jest",
         {
           "jsc": {
-            "parser": { "syntax": "typescript", "decorators": true },
-            "transform": { "legacyDecorator": true, "decoratorMetadata": true },
+            "parser": {
+              "syntax": "typescript",
+              "decorators": true
+            },
+            "transform": {
+              "legacyDecorator": true,
+              "decoratorMetadata": true
+            },
             "target": "es2022"
           }
         }
       ]
     },
-    "testMatch": ["<rootDir>/test/**/*.spec.ts", "<rootDir>/src/**/*.spec.ts"],
+    "testMatch": [
+      "<rootDir>/test/**/*.spec.ts",
+      "<rootDir>/src/**/*.spec.ts"
+    ],
     "globalSetup": "<rootDir>/test/global-setup.ts",
     "testTimeout": 30000
   }
