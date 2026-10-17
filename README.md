@@ -26,11 +26,15 @@ docs/                  architecture notes and implementation status
 
 ## First run
 
+The quickest way to get PostgreSQL is Docker: `docker compose up -d` starts PostgreSQL 16 on
+`localhost:5432` with user `postgres`, password `postgres` and database `ckh_one` already created
+(skip step 1 below). Use `postgres://postgres:postgres@localhost:5432/...` in the URLs.
+
 ```bash
 pnpm install
 pnpm --filter @ckh/shared build
 
-# 1. Create the database and the application login (once)
+# 1. Create the database and the application login (once; not needed with Docker)
 psql -U postgres -c "CREATE DATABASE ckh_one"
 
 # 2. Run migrations as the database owner
