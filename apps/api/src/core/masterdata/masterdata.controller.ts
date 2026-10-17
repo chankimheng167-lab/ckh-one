@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { MODULES, P } from '@ckh/shared';
+import { randomUUID } from 'crypto';
+import { Decimal, MODULES, P } from '@ckh/shared';
 import { z } from 'zod';
 import { CurrentUser, RequireModules, RequirePermissions, TenantUser } from '../../common/auth-context';
 import { AuditService } from '../../common/audit.service';
 import { DomainError } from '../../common/errors';
 import { decimalString, isoDate, parse, positiveDecimal, uuid } from '../../common/validation';
 import { DatabaseService } from '../../db/database.service';
+import { JournalService } from '../../accounting/journal.service';
+import { StockService } from '../../inventory/stock.service';
 
 const CreateProduct = z.object({
   sku: z.string().min(1).max(60),
@@ -19,6 +22,29 @@ const CreateProduct = z.object({
   costPrice: decimalString.default('0'),
   trackInventory: z.boolean().default(true),
   imageUrls: z.array(z.string().url()).max(10).default([]),
+  /** Variant of a template product (e.g. a size/colour of a shirt). */
+  parentProductId: uuid.optional(),
+  variantAttributes: z.record(z.string().min(1).max(40), z.string().min(1).max(60)).optional(),
+  productType: z.enum(['STOCK', 'SERVICE', 'NON_STOCK']).default('STOCK'),
+  serialTracked: z.boolean().default(false),
+  reorderPoint: decimalString.nullable().optional(),
+});
+
+const CreateCategory = z.object({ code: z.string().min(1).max(40), name: z.string().min(1).max(200), parentId: uuid.optional() });
+
+const StockAdjustment = z.object({
+  warehouseId: uuid,
+  reason: z.string().trim().min(3).max(300),
+  lines: z
+    .array(
+      z.object({
+        productId: uuid,
+        /** Physical count; the difference to the system quantity is posted. */
+        countedQuantity: decimalString,
+      }),
+    )
+    .min(1)
+    .max(500),
 });
 
 const CreateCustomer = z.object({
@@ -69,7 +95,12 @@ const PriceListItem = z.object({
 /** Core master data shared by POS, Inventory, Accounting and Sales. */
 @Controller('masterdata')
 export class MasterDataController {
-  constructor(private readonly db: DatabaseService, private readonly audit: AuditService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
+    private readonly stock: StockService,
+    private readonly journal: JournalService,
+  ) {}
 
   @Get('reference')
   reference(@CurrentUser() user: TenantUser) {
@@ -90,13 +121,39 @@ export class MasterDataController {
     const i = parse(CreateProduct, body);
     return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
       const unitId = i.baseUnitId ?? (await tx.one<{ id: string }>(`SELECT id FROM units WHERE code = 'PCS'`)).id;
+      if (i.barcode) {
+        const dup = await tx.maybeOne<{ sku: string }>(`SELECT sku FROM products WHERE barcode = $1 AND status = 'ACTIVE'`, [i.barcode]);
+        if (dup) throw new DomainError('DUPLICATE_BARCODE', `Barcode ${i.barcode} is already used by ${dup.sku}`, 409);
+      }
+      if (i.parentProductId) {
+        const parent = await tx.maybeOne<{ parent_product_id: string | null }>('SELECT parent_product_id FROM products WHERE id = $1', [i.parentProductId]);
+        if (!parent) throw new DomainError('NOT_FOUND', 'Parent product not found', 404);
+        if (parent.parent_product_id) throw new DomainError('INVALID_PARENT', 'A variant cannot have variants of its own', 422);
+      }
       const p = await tx.one(
-        `INSERT INTO products (tenant_id, sku, barcode, name, name_local, category_id, base_unit_id, tax_code_id, list_price, cost_price, track_inventory, image_urls)
-         VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, sku, name, list_price`,
-        [i.sku, i.barcode ?? null, i.name, i.nameLocal ?? null, i.categoryId ?? null, unitId, i.taxCodeId ?? null, i.listPrice, i.costPrice, i.trackInventory, i.imageUrls],
+        `INSERT INTO products (tenant_id, sku, barcode, name, name_local, category_id, base_unit_id, tax_code_id, list_price, cost_price, track_inventory,
+            image_urls, parent_product_id, variant_attributes, product_type, serial_tracked, reorder_point)
+         VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id, sku, name, list_price`,
+        [i.sku, i.barcode ?? null, i.name, i.nameLocal ?? null, i.categoryId ?? null, unitId, i.taxCodeId ?? null, i.listPrice, i.costPrice,
+          i.trackInventory && i.productType === 'STOCK', i.imageUrls, i.parentProductId ?? null, i.variantAttributes ? JSON.stringify(i.variantAttributes) : null,
+          i.productType, i.serialTracked, i.reorderPoint ?? null],
       );
       await this.audit.record(tx, { action: 'PRODUCT_CREATED', entityType: 'product', entityId: p.id, after: p });
       return p;
+    });
+  }
+
+  @Post('categories')
+  @RequirePermissions(P.PRODUCTS_MANAGE)
+  createCategory(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(CreateCategory, body);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const c = await tx.one(
+        `INSERT INTO product_categories (tenant_id, code, name, parent_id) VALUES (current_tenant_id(), $1, $2, $3) RETURNING *`,
+        [i.code, i.name, i.parentId ?? null],
+      );
+      await this.audit.record(tx, { action: 'CATEGORY_CREATED', entityType: 'product_category', entityId: c.id, after: c });
+      return c;
     });
   }
 
@@ -165,6 +222,66 @@ export class MasterDataController {
       }
       await this.audit.record(tx, { action: 'STOCK_RECEIVED', entityType: 'warehouse', entityId: i.warehouseId, after: i });
       return { received: i.lines.length };
+    });
+  }
+
+  /**
+   * Stock count adjustment: sets on-hand to the counted quantity, records an
+   * ADJUSTMENT movement, and posts the value difference against the
+   * inventory-adjustments account at weighted-average cost.
+   */
+  @Post('stock/adjustments')
+  @RequireModules(MODULES.INVENTORY)
+  @RequirePermissions(P.INVENTORY_ADJUST)
+  adjust(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(StockAdjustment, body);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const ids = i.lines.map((l) => l.productId);
+      if (new Set(ids).size !== ids.length) throw new DomainError('DUPLICATE_LINE', 'Each product may appear once', 422);
+      await this.stock.lock(tx, i.warehouseId, ids);
+      const results: { productId: string; before: string; counted: string; difference: string; value: string }[] = [];
+      let gain = new Decimal(0);
+      let loss = new Decimal(0);
+      const adjustmentId = randomUUID();
+      for (const l of [...i.lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
+        const row = await tx.one<{ qty_on_hand: string; qty_reserved: string; avg_cost: string }>(
+          'SELECT qty_on_hand, qty_reserved, avg_cost FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2',
+          [i.warehouseId, l.productId],
+        );
+        const counted = new Decimal(l.countedQuantity);
+        if (counted.lt(0)) throw new DomainError('INVALID_QUANTITY', 'Counted quantity cannot be negative', 422);
+        const diff = counted.minus(row.qty_on_hand);
+        if (diff.isZero()) continue;
+        await tx.query('UPDATE stock_levels SET qty_on_hand = $3 WHERE warehouse_id = $1 AND product_id = $2', [i.warehouseId, l.productId, counted.toString()]);
+        await tx.query(
+          `INSERT INTO stock_movements (tenant_id, warehouse_id, product_id, movement_type, quantity, unit_cost, reference_type, reference_id, notes, created_by)
+           VALUES (current_tenant_id(), $1, $2, 'ADJUSTMENT', $3, $4, 'STOCK_ADJUSTMENT', $5, $6, $7)`,
+          [i.warehouseId, l.productId, diff.toString(), row.avg_cost, adjustmentId, i.reason, user.userId],
+        );
+        const value = diff.abs().mul(row.avg_cost).toDecimalPlaces(2);
+        if (diff.gt(0)) gain = gain.plus(value);
+        else loss = loss.plus(value);
+        results.push({ productId: l.productId, before: row.qty_on_hand, counted: counted.toString(), difference: diff.toString(), value: value.toFixed(2) });
+      }
+      let journalId: string | null = null;
+      if (!gain.isZero() || !loss.isZero()) {
+        const acc = await this.journal.accounts(tx);
+        const adj = await tx.one<{ id: string | null }>('SELECT inventory_adjustment_account_id AS id FROM pos_settings WHERE tenant_id = current_tenant_id()');
+        journalId = await this.journal.post(tx, {
+          date: tx.today(),
+          description: `Stock adjustment: ${i.reason}`,
+          sourceType: 'STOCK_ADJUSTMENT',
+          sourceId: adjustmentId,
+          lines: [
+            { accountId: acc.inventory, debit: gain, description: 'Stock found' },
+            { accountId: adj.id as string, credit: gain, description: 'Stock found' },
+            { accountId: adj.id as string, debit: loss, description: 'Stock lost' },
+            { accountId: acc.inventory, credit: loss, description: 'Stock lost' },
+          ],
+        });
+      }
+      await this.audit.record(tx, { action: 'STOCK_ADJUSTED', entityType: 'warehouse', entityId: i.warehouseId, after: { reason: i.reason, results, journalId } });
+      return { adjustmentId, journalId, lines: results };
     });
   }
 }

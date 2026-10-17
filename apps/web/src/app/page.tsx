@@ -1,4 +1,5 @@
 'use client';
+import { useEffect } from 'react';
 import { Authed } from '@/components/Authed';
 import { Card, Empty, ErrorBox, Loading, Page, Progress, Stat, Status } from '@/components/ui';
 import { ago, human, money, num } from '@/lib/format';
@@ -7,7 +8,13 @@ import { useSession } from '@/lib/session';
 
 function Dashboard() {
   const s = useSession();
-  const { data: d, error, loading, reload } = useApi(s.online ? '/sales/dashboard' : null);
+  // Cashiers without sales-force access start at the POS.
+  const posOnly = !s.can('sales.dashboard.view') && s.can('pos.access') && s.hasModule('POS_SALES');
+  useEffect(() => {
+    if (posOnly) location.replace('/pos/');
+  }, [posOnly]);
+  const { data: d, error, loading, reload } = useApi(s.online && !posOnly ? '/sales/dashboard' : null);
+  if (posOnly) return <Loading />;
   if (!s.online) return <Page title="Sales dashboard"><div className="notice warn">You are offline. Orders, visits and collections you record are saved on this device and sent when you reconnect.</div><OfflineSummary /></Page>;
   if (loading && !d) return <Loading />;
   if (error) return <ErrorBox error={error} />;

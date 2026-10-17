@@ -6,12 +6,17 @@ import { notFound } from '../common/errors';
 import { isoDate, parse, uuid } from '../common/validation';
 import { DatabaseService } from '../db/database.service';
 import { InvoicingService } from '../sales/billing/invoicing.service';
+import { PosReconciliationService } from '../pos/pos-reconciliation.service';
 
 /** Read side of receivables for accountants. Postings happen only through sales documents. */
 @RequireModules(MODULES.ACCOUNTING)
 @Controller('accounting')
 export class AccountingController {
-  constructor(private readonly db: DatabaseService, private readonly invoicing: InvoicingService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly invoicing: InvoicingService,
+    private readonly pos: PosReconciliationService,
+  ) {}
 
   @Get('invoices')
   @RequirePermissions(P.SALES_INVOICES_CREATE)
@@ -145,6 +150,8 @@ export class AccountingController {
         { code: 'STOCK_NOT_OVERSOLD', ok: Number(stock.n) === 0, details: { rows: Number(stock.n) } },
         // An event left RECEIVED was never settled; REJECTED / CONFLICT events were refused cleanly and changed nothing.
         { code: 'OFFLINE_EVENTS_SETTLED', ok: Number(sync.stuck) === 0, details: { unsettled: Number(sync.stuck), refused: Number(sync.refused) } },
+        // POS: every sale, return, shift difference, verification and settlement posted once and for the right amount.
+        ...(await this.pos.ledgerChecks(tx)),
       ];
       return { ok: checks.every((c) => c.ok), checkedAt: new Date().toISOString(), checks };
     });

@@ -18,6 +18,13 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     ],
   },
   {
+    title: 'Point of sale',
+    items: [
+      { href: '/pos/sell/', label: 'POS checkout', icon: '▣', perm: P.POS_SALES_CREATE, module: 'POS_SALES' },
+      { href: '/pos/', label: 'POS dashboard', icon: '◫', perm: P.POS_ACCESS, module: 'POS_SALES' },
+    ],
+  },
+  {
     title: 'Operations',
     items: [
       { href: '/approvals/', label: 'Pending approvals', icon: '✓', perm: P.SALES_ORDERS_APPROVE, module: 'SALES_ORDER_MANAGEMENT' },

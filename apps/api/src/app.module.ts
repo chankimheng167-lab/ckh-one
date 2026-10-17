@@ -48,6 +48,21 @@ import { SyncService } from './sales/sync/sync.service';
 import { ThemeController } from './core/theme/theme.controller';
 import { ReportsController } from './sales/reports/reports.controller';
 import { ReportsService } from './sales/reports/reports.service';
+import { PosAdminController, PosController, PosDevicesController, PosDocumentsController, PosPaymentsController, PosShiftsController } from './pos/pos.controllers';
+import { PosPaymentsService } from './pos/pos-payments.service';
+import { PosDevicesService } from './pos/pos-devices.service';
+import { PosLicenseService } from './pos/pos-license.service';
+import { PosSyncService } from './pos/pos-sync.service';
+import { PosReconciliationService } from './pos/pos-reconciliation.service';
+import { PosReceiptsService } from './pos/pos-receipts.service';
+import { PosReportsService } from './pos/pos-reports.service';
+import { PosReturnsService } from './pos/pos-returns.service';
+import { PosAdminService } from './pos/pos-admin.service';
+import { PosCatalogService } from './pos/pos-catalog.service';
+import { PosContextService } from './pos/pos-context.service';
+import { PosHeldService } from './pos/pos-held.service';
+import { PosSalesService } from './pos/pos-sales.service';
+import { PosShiftsService } from './pos/pos-shifts.service';
 
 @Global()
 @Module({
@@ -91,6 +106,12 @@ export class CoreInfraModule {}
     ThemeController,
     ReportsController,
     AccountingController,
+    PosController,
+    PosShiftsController,
+    PosAdminController,
+    PosDocumentsController,
+    PosPaymentsController,
+    PosDevicesController,
   ],
   providers: [
     SessionService,
@@ -111,6 +132,20 @@ export class CoreInfraModule {}
     QuotationsService,
     SyncService,
     ReportsService,
+    PosContextService,
+    PosCatalogService,
+    PosSalesService,
+    PosShiftsService,
+    PosHeldService,
+    PosAdminService,
+    PosReturnsService,
+    PosReceiptsService,
+    PosReportsService,
+    PosPaymentsService,
+    PosReconciliationService,
+    PosDevicesService,
+    PosLicenseService,
+    PosSyncService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

@@ -1,6 +1,6 @@
 import { loadConfig, PUBLIC_DEMO_PASSWORD } from '../config';
 import { newPassword } from '../common/validation';
-import { platformTx, seedDemoTenant, seedPlatform } from './seed';
+import { platformTx, seedDemoPos, seedDemoTenant, seedPlatform } from './seed';
 
 /**
  * Production never uses the public demo password: the Super Admin password
@@ -26,7 +26,10 @@ async function main() {
   const url = loadConfig().migrationDatabaseUrl;
   const o = seedOptions();
   await platformTx(url, (tx) => seedPlatform(tx, { email: o.email, password: o.superAdminPassword, fullName: 'CKH Super Admin' }));
-  if (o.seedDemo) await platformTx(url, (tx) => seedDemoTenant(tx, o.demoPassword));
+  if (o.seedDemo) {
+    await platformTx(url, (tx) => seedDemoTenant(tx, o.demoPassword));
+    await platformTx(url, (tx) => seedDemoPos(tx, o.demoPassword));
+  }
   console.log('seed complete');
 }
 
