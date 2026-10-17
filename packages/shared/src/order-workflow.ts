@@ -53,7 +53,7 @@ export type OrderAction = (typeof ORDER_ACTION)[keyof typeof ORDER_ACTION];
 export interface OrderWorkflowSettings {
   /** When false, RESERVE goes straight to a state from which DISPATCH is allowed. */
   pickPackEnabled: boolean;
-  /** Allow invoicing as soon as goods are dispatched (otherwise only after delivery). */
+  /** Allow invoicing as soon as goods are dispatched (otherwise only after delivery is confirmed). */
   invoiceOnDispatch: boolean;
 }
 
@@ -78,18 +78,16 @@ export function transitionTable(settings: OrderWorkflowSettings = DEFAULT_WORKFL
     [A.RESERVE]: { from: [S.APPROVED], to: S.STOCK_RESERVED },
     [A.START_PICKING]: { from: settings.pickPackEnabled ? [S.STOCK_RESERVED] : [], to: S.PICKING },
     [A.PACK]: { from: settings.pickPackEnabled ? [S.PICKING] : [], to: S.PACKED },
+    // Later shipments of backordered goods leave from PARTIALLY_DELIVERED.
     [A.DISPATCH]: {
-      from: settings.pickPackEnabled ? [S.PACKED] : [S.STOCK_RESERVED],
+      from: settings.pickPackEnabled ? [S.PACKED, S.PARTIALLY_DELIVERED] : [S.STOCK_RESERVED, S.PARTIALLY_DELIVERED],
       to: S.DISPATCHED,
     },
     [A.DELIVER_PARTIAL]: { from: [S.DISPATCHED, S.PARTIALLY_DELIVERED], to: S.PARTIALLY_DELIVERED },
     [A.DELIVER]: { from: [S.DISPATCHED, S.PARTIALLY_DELIVERED], to: S.DELIVERED },
-    [A.INVOICE]: {
-      from: settings.invoiceOnDispatch
-        ? [S.DISPATCHED, S.PARTIALLY_DELIVERED, S.DELIVERED]
-        : [S.DELIVERED],
-      to: S.INVOICED,
-    },
+    // The order becomes INVOICED once everything delivered is invoiced. Partial
+    // invoices (see invoiceableStatuses) do not change the order status.
+    [A.INVOICE]: { from: [S.DELIVERED], to: S.INVOICED },
     [A.CLOSE]: { from: [S.INVOICED], to: S.CLOSED },
     [A.CANCEL]: {
       from: [S.DRAFT, S.SUBMITTED, S.PENDING_APPROVAL, S.APPROVED, S.REJECTED, S.STOCK_RESERVED, S.PICKING, S.PACKED],
@@ -124,6 +122,21 @@ export function allowedActions(
   const table = transitionTable(settings);
   return (Object.keys(table) as OrderAction[]).filter((a) => table[a]!.from.includes(from));
 }
+
+/** Statuses in which an invoice may be raised for what has shipped so far. */
+export function invoiceableStatuses(settings: OrderWorkflowSettings = DEFAULT_WORKFLOW_SETTINGS): OrderStatus[] {
+  return settings.invoiceOnDispatch
+    ? [S.DISPATCHED, S.PARTIALLY_DELIVERED, S.DELIVERED]
+    : [S.PARTIALLY_DELIVERED, S.DELIVERED];
+}
+
+/** Statuses in which more stock may be reserved for backordered lines. */
+export const BACKORDER_RESERVABLE_STATUSES: OrderStatus[] = [
+  S.STOCK_RESERVED, S.PICKING, S.PACKED, S.DISPATCHED, S.PARTIALLY_DELIVERED,
+];
+
+/** Statuses from which delivered goods can be returned. */
+export const RETURNABLE_STATUSES: OrderStatus[] = [S.PARTIALLY_DELIVERED, S.DELIVERED, S.INVOICED, S.CLOSED];
 
 /** Statuses during which stock reservations exist and must be released on cancel. */
 export const RESERVATION_HOLDING_STATUSES: OrderStatus[] = [S.STOCK_RESERVED, S.PICKING, S.PACKED];

@@ -451,8 +451,23 @@ export class OrdersService {
         WHERE h.order_id = $1 ORDER BY h.id`,
       [orderId],
     );
+    const deliveries = await tx.query(
+      `SELECT id, number, status, carrier, tracking_reference, dispatched_at, delivered_at, received_by_name
+         FROM sales_deliveries WHERE order_id = $1 ORDER BY dispatched_at`,
+      [orderId],
+    );
+    const invoices = await tx.query(
+      `SELECT id, number, invoice_date, due_date, grand_total, amount_paid, amount_credited, status
+         FROM invoices WHERE sales_order_id = $1 ORDER BY invoice_date, number`,
+      [orderId],
+    );
+    const returns = await tx.query(
+      `SELECT r.id, r.number, r.status, r.reason, r.created_at, cn.number AS credit_note_number
+         FROM sales_returns r LEFT JOIN credit_notes cn ON cn.id = r.credit_note_id WHERE r.order_id = $1 ORDER BY r.created_at`,
+      [orderId],
+    );
     const settings = await this.ctx.settings(tx);
-    return { ...order, lines, approvals, history, allowedActions: allowedActions(order.status, settings.workflow) };
+    return { ...order, lines, approvals, history, deliveries, invoices, returns, allowedActions: allowedActions(order.status, settings.workflow) };
   }
 
   async list(tx: Tx, user: TenantUser, q: { status?: string; customerId?: string; salesRepId?: string; from?: string; to?: string; mine?: boolean; limit: number; offset: number }) {
@@ -720,14 +735,14 @@ export class OrdersService {
     return { order, pending, satisfiable };
   }
 
-  private async transition(tx: Tx, orderId: string, from: OrderStatus, action: OrderAction, actor: string | null, comment: string | null, settings: SalesSettings): Promise<OrderStatus> {
+  async transition(tx: Tx, orderId: string, from: OrderStatus, action: OrderAction, actor: string | null, comment: string | null, settings: SalesSettings): Promise<OrderStatus> {
     const to = nextStatus(from, action, settings.workflow);
     await tx.query('UPDATE sales_orders SET status = $2 WHERE id = $1', [orderId, to]);
     await this.history(tx, orderId, from, to, action, actor, comment);
     return to;
   }
 
-  private async history(tx: Tx, orderId: string, from: string | null, to: string, action: string, actor: string | null, comment: string | null) {
+  async history(tx: Tx, orderId: string, from: string | null, to: string, action: string, actor: string | null, comment: string | null) {
     await tx.query(
       `INSERT INTO sales_order_status_history (tenant_id, order_id, from_status, to_status, action, actor_user_id, comment)
        VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6)`,

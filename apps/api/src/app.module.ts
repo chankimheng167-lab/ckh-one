@@ -1,6 +1,8 @@
 import { Global, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import { AccountingController } from './accounting/accounting.controller';
+import { JournalService } from './accounting/journal.service';
 import { AuditService } from './common/audit.service';
 import { AllExceptionsFilter } from './common/errors';
 import { loadConfig } from './config';
@@ -14,6 +16,12 @@ import { TenantProvisioningService } from './core/platform/tenant-provisioning.s
 import { SubscriptionService } from './core/subscriptions/subscription.service';
 import { TenantAdminController } from './core/tenant-admin/tenant-admin.controller';
 import { DatabaseService } from './db/database.service';
+import { StockService } from './inventory/stock.service';
+import { InvoicingService } from './sales/billing/invoicing.service';
+import { CollectionsService } from './sales/collections/collections.service';
+import { CollectionsController, DeliveriesController, FulfilmentController, ReturnsController } from './sales/fulfilment.controllers';
+import { FulfilmentService } from './sales/fulfilment/fulfilment.service';
+import { ReturnsService } from './sales/returns/returns.service';
 import { CatalogService } from './sales/catalog/catalog.service';
 import { SalesCustomersService } from './sales/customers/sales-customers.service';
 import { OrdersService } from './sales/orders/orders.service';
@@ -23,8 +31,8 @@ import { CatalogController, OrdersController, SalesCustomersController } from '.
 
 @Global()
 @Module({
-  providers: [DatabaseService, AuditService, NumberingService, SubscriptionService],
-  exports: [DatabaseService, AuditService, NumberingService, SubscriptionService],
+  providers: [DatabaseService, AuditService, NumberingService, SubscriptionService, JournalService, StockService],
+  exports: [DatabaseService, AuditService, NumberingService, SubscriptionService, JournalService, StockService],
 })
 export class CoreInfraModule {}
 
@@ -48,6 +56,11 @@ export class CoreInfraModule {}
     SalesCustomersController,
     CatalogController,
     OrdersController,
+    FulfilmentController,
+    DeliveriesController,
+    ReturnsController,
+    CollectionsController,
+    AccountingController,
   ],
   providers: [
     TenantProvisioningService,
@@ -56,6 +69,10 @@ export class CoreInfraModule {}
     OrdersService,
     SalesCustomersService,
     CatalogService,
+    InvoicingService,
+    FulfilmentService,
+    ReturnsService,
+    CollectionsService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

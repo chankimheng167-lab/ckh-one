@@ -85,7 +85,13 @@ export class SalesCustomersService {
     );
     let balances: unknown = null;
     let payments: unknown[] = [];
+    let openInvoices: unknown[] = [];
     if (await this.canSeeBalances(tx, user)) {
+      openInvoices = await tx.query(
+        `SELECT id, number, invoice_date, due_date, currency, grand_total, grand_total - amount_paid - amount_credited AS balance_due, status
+           FROM invoices WHERE customer_id = $1 AND status IN ('ISSUED', 'PARTIALLY_PAID') ORDER BY due_date`,
+        [customerId],
+      );
       balances = await tx.maybeOne('SELECT outstanding, overdue, oldest_due_date FROM customer_balances WHERE customer_id = $1', [customerId]);
       payments = await tx.query(
         `SELECT id, number, receipt_date, amount, currency, payment_method FROM customer_receipts
@@ -95,7 +101,7 @@ export class SalesCustomersService {
     } else {
       delete (c as any).credit_limit;
     }
-    return { ...c, addresses, notes, recentOrders: orders, balances, recentPayments: payments };
+    return { ...c, addresses, notes, recentOrders: orders, balances, openInvoices, recentPayments: payments };
   }
 
   async addNote(tx: Tx, user: TenantUser, customerId: string, body: string) {

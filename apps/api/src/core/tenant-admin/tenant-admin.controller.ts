@@ -196,4 +196,27 @@ export class TenantAdminController {
       return after;
     });
   }
+
+  @Get('accounting/settings')
+  @RequireModules(MODULES.ACCOUNTING)
+  @RequirePermissions(P.TENANT_SETTINGS_MANAGE)
+  getAccountingSettings(@CurrentUser() user: TenantUser) {
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => tx.one('SELECT * FROM accounting_settings WHERE tenant_id = current_tenant_id()'));
+  }
+
+  /** When revenue is recognised: ON_INVOICE (accountant raises invoices) or ON_DELIVERY (automatic on proof of delivery). */
+  @Put('accounting/settings')
+  @RequireModules(MODULES.ACCOUNTING)
+  @RequirePermissions(P.TENANT_SETTINGS_MANAGE)
+  putAccountingSettings(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(z.object({ revenueRecognition: z.enum(['ON_INVOICE', 'ON_DELIVERY']) }), body);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const after = await tx.one(
+        'UPDATE accounting_settings SET revenue_recognition = $1 WHERE tenant_id = current_tenant_id() RETURNING *',
+        [i.revenueRecognition],
+      );
+      await this.audit.record(tx, { action: 'ACCOUNTING_SETTINGS_UPDATED', entityType: 'accounting_settings', after: i });
+      return after;
+    });
+  }
 }
