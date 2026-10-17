@@ -91,7 +91,7 @@ The spec's required end-to-end scenarios and where they are tested:
 
 ## Known issues and decisions to review
 
-1. **Not pushed to GitHub yet.** GitHub was not connected to this workspace, so the code is delivered as files. CI (`.github/workflows/ci.yml`) runs the same checks on first push.
+1. **CI on GitHub.** The code is on GitHub (`chankimheng167-lab/ckh-one`); `.github/workflows/ci.yml` runs the same checks on every push.
 2. **Dates use UTC.** "Today", default report ranges and visit dates are computed in UTC. Cambodia is UTC+7, so activity between 00:00 and 07:00 local time lands on the previous day. Fix: store a tenant time zone and compute business dates with it.
 3. **Order line ids change on submit.** Submit re-prices and re-inserts the lines; anything referencing a line (e.g. a return) must read the order after submit. Harmless today, but a future API should keep line ids stable.
 4. **Offline catalogue size.** The snapshot carries up to 5,000 products and is a full download each time; large catalogues need paging and delta sync (`since` is accepted but not used yet).
