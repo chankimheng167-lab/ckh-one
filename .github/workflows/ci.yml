@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_PG_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Add `cache: pnpm` once pnpm-lock.yaml is committed.
+      - run: pnpm install
+      - run: pnpm --filter @ckh/shared build
+      - name: Unit tests (shared domain logic)
+        run: pnpm --filter @ckh/shared test
+      - name: Type-check API
+        run: pnpm --filter @ckh/api typecheck
+      - name: Database guard checks (RLS, oversell, ledger balance, audit log)
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE ckh_guards"
+          for f in apps/api/db/migrations/*.sql apps/api/db/repeatable/*.sql; do
+            psql -h localhost -U postgres -d ckh_guards -v ON_ERROR_STOP=1 -q -1 -f "$f"
+          done
+          psql -h localhost -U postgres -d ckh_guards -f apps/api/db/tests/schema_guards.sql 2>&1 | tee guards.log
+          for expected in "violates row-level security policy for table \"customers\"" \
+                          "permission denied for table platform_modules" \
+                          "violates row-level security policy for table \"tenant_modules\"" \
+                          "products_tenant_id_base_unit_id_fkey" \
+                          "would exceed stock on hand" \
+                          "does not balance" \
+                          "permission denied for table audit_log"; do
+            grep -q "$expected" guards.log || { echo "MISSING EXPECTED GUARD: $expected"; exit 1; }
+          done
+      - name: API end-to-end tests
+        run: pnpm --filter @ckh/api test

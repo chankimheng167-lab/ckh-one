@@ -30,7 +30,6 @@
     "@swc/core": "^1.7.40",
     "@swc/jest": "^0.2.36",
     "@types/bcryptjs": "^2.4.6",
-    "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
