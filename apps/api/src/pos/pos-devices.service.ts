@@ -73,14 +73,14 @@ export class PosDevicesService {
   /** Checks the X-POS-Device header against the stored hash. */
   async authenticate(tx: Tx, header: string | undefined): Promise<PosDevice> {
     const m = /^([0-9a-f-]{36}):([A-Za-z0-9_-]{20,100})$/.exec(header ?? '');
-    if (!m) throw new DomainError('DEVICE_REQUIRED', 'This call must come from an activated CKH ONE POS device', 401);
+    if (!m) throw new DomainError('DEVICE_REQUIRED', 'This call must come from an activated CKH ONE POS device', 403);
     const d = await tx.maybeOne<PosDevice & { secret_hash: string }>(
       `SELECT d.*, r.branch_id, r.warehouse_id FROM pos_devices d JOIN pos_registers r ON r.id = d.register_id WHERE d.id = $1`,
       [m[1]],
     );
     const given = Buffer.from(sha(m[2]), 'hex');
     const ok = !!d && timingSafeEqual(given, Buffer.from(d.secret_hash, 'hex'));
-    if (!ok) throw new DomainError('DEVICE_UNKNOWN', 'This device is not recognised; activate it again', 401);
+    if (!ok) throw new DomainError('DEVICE_UNKNOWN', 'This device is not recognised; activate it again', 403);
     if (d!.status !== 'ACTIVE') throw new DomainError('DEVICE_REVOKED', 'This device was revoked by a manager', 403);
     const { secret_hash: _s, ...device } = d!;
     return device;

@@ -4,6 +4,7 @@ import { P } from '@ckh/shared';
 import { ErrorBox } from '@/components/ui';
 import { useSession } from '@/lib/session';
 import { usePosContext } from '@/lib/pos';
+import { desktopOffline, DeviceStatus, LICENSE_REASONS, refreshDevice } from '@/lib/device';
 
 type PosState = ReturnType<typeof usePosContext>;
 const Ctx = createContext<PosState | null>(null);
@@ -43,6 +44,7 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
   useEffect(() => {
     if (!s.loading && !s.me) location.href = '/login/';
   }, [s.loading, s.me]);
+  const device = useDevice();
 
   if (!s.me) return <div className="content muted">{s.loading ? 'Loading…' : 'Redirecting to sign in…'}</div>;
   if (!s.hasModule('POS_SALES')) {
@@ -66,6 +68,7 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
     return (
       <div className="pos-center">
         <ErrorBox error={pos.error} />
+        {pos.error.isNetwork && device && <OfflineTillLink device={device} />}
         <button onClick={pos.reload}>Try again</button>
       </div>
     );
@@ -102,10 +105,19 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
             <span className="muted">{clock}</span>
           </div>
         </header>
-        {!s.online && (
-          <div className="notice warn pos-banner">
-            This browser is offline. The web till only records sales online; use the CKH ONE POS desktop app for offline selling.
-          </div>
+        {!s.online &&
+          (device ? (
+            <div className="notice warn pos-banner"><OfflineTillLink device={device} /></div>
+          ) : (
+            <div className="notice warn pos-banner">
+              This browser is offline. The web till only records sales online; use the CKH ONE POS desktop app for offline selling.
+            </div>
+          ))}
+        {s.online && device && device.queued > 0 && (
+          <div className="notice pos-banner">{device.queued} offline sale{device.queued === 1 ? '' : 's'} on this computer waiting to upload.</div>
+        )}
+        {s.online && device?.license.reason === 'REVOKED' && (
+          <div className="notice bad pos-banner">{LICENSE_REASONS.REVOKED}</div>
         )}
         <main className={`pos-main${wide ? ' wide' : ''}`}>
           {needRegister && !ctx.register ? <RegisterPicker pos={pos} /> : children}
@@ -120,6 +132,67 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
         </nav>
       </div>
     </Ctx.Provider>
+  );
+}
+
+const REFRESH_KEY = 'ckh.pos.deviceRefreshedAt';
+
+/**
+ * On the Windows app: renews the offline licence, refreshes the offline
+ * catalogue and uploads waiting sales, at most every five minutes (and at
+ * once when the connection comes back or sales are waiting).
+ */
+function useDevice() {
+  const s = useSession();
+  const [device, setDevice] = useState<DeviceStatus | null>(null);
+  const userId = s.me?.userId;
+  const canSell = s.can(P.POS_SALES_CREATE);
+  useEffect(() => {
+    const d = desktopOffline();
+    if (!userId || !d) return;
+    let stop = false;
+    const run = async (force = false) => {
+      const st = await d.device.status().catch(() => null);
+      if (stop || !st) return;
+      setDevice(st);
+      if (!navigator.onLine || !st.activated) return;
+      let last = 0;
+      try {
+        last = Number(sessionStorage.getItem(REFRESH_KEY) ?? 0);
+      } catch {
+        /* storage unavailable */
+      }
+      if (!force && st.queued === 0 && Date.now() - last < 5 * 60_000) return;
+      const next = await refreshDevice(userId, canSell).catch(() => null);
+      try {
+        sessionStorage.setItem(REFRESH_KEY, String(Date.now()));
+      } catch {
+        /* storage unavailable */
+      }
+      if (!stop) setDevice(next ?? (await d.device.status().catch(() => st)));
+    };
+    void run();
+    const online = () => void run(true);
+    window.addEventListener('online', online);
+    const t = setInterval(() => void run(), 5 * 60_000);
+    return () => {
+      stop = true;
+      window.removeEventListener('online', online);
+      clearInterval(t);
+    };
+  }, [userId, canSell]);
+  return device;
+}
+
+function OfflineTillLink({ device }: { device: DeviceStatus }) {
+  if (!device.activated) return <span>The server cannot be reached, and this computer is not activated for offline selling.</span>;
+  if (!device.license.valid) return <span>The server cannot be reached. {LICENSE_REASONS[device.license.reason ?? 'NO_LICENSE']}</span>;
+  return (
+    <span>
+      The server cannot be reached. You can keep selling for cash on the offline till until{' '}
+      {new Date(device.license.expiresAt!).toLocaleString()}.{' '}
+      <a href="/pos/offline/" className="btn primary">Open the offline till</a>
+    </span>
   );
 }
 

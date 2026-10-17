@@ -126,7 +126,7 @@ the API; menus only hide what the API would refuse anyway.
 | 4 | Receipts, returns/refunds, shifts, reports | ✅ |
 | 5 | Accounting integration and reconciliation | ✅ |
 | 6 | Windows desktop POS and hardware | ✅ (see limits) |
-| 7 | Offline sync and device licensing | |
+| 7 | Offline sync and device licensing | ✅ (see limits) |
 | 8 | Security tests, documentation, deployment | |
 
 ### Phase 1 — done
@@ -239,7 +239,7 @@ the API; menus only hide what the API would refuse anyway.
 - Printing: silent HTML printing to a Windows printer (58/80 mm, A4; any language), or ESC/POS text to a network
   printer on port 9100 with paper cut; the drawer pulses with the original receipt of a cash sale (network ESC/POS),
   or from Printer settings for users with `pos.cash.drawer`. A failed print shows "Receipt not printed".
-- Encrypted local store: AES-256-GCM, data key protected by Windows DPAPI (`safeStorage`); ready for phase 7.
+- Encrypted local store: AES-256-GCM, data key protected by Windows DPAPI (`safeStorage`); used by phase 7.
 - Updates: electron-updater with SHA-512 check and same-publisher signature check on Windows; the cashier chooses
   when to restart. Installer: NSIS (per-machine, desktop shortcut) via `electron-builder.config.js`; signing from
   `CSC_LINK`/`CSC_KEY_PASSWORD`, publisher from `CKH_PUBLISHER_NAME`.
@@ -259,3 +259,51 @@ the API; menus only hide what the API would refuse anyway.
     Wine); the Windows CI job is what builds it. It is unsigned until a code-signing certificate is provided, and the
     update flow has not been exercised end to end.
   - Raw ESC/POS over USB or serial (COM) is not supported; such printers must be used through their Windows driver.
+
+### Phase 7 — done, with limits
+- Device activation (`POST /pos/devices/activate`, `pos.devices.manage`): a manager activates a Windows computer for
+  one register, inside the plan's device limit (`LICENSE_LIMIT_REACHED`). The server returns a random device secret
+  once and stores only its SHA-256. The app keeps the secret in its encrypted store and adds
+  `X-POS-Device: <id>:<secret>` to the till's `/pos/` calls itself, so the secret never reaches the page.
+  Revoking (`POST /pos/devices/:id/revoke`) is audited and ends the licence at once.
+- Offline licence: an Ed25519-signed token (`ckhpos1.<payload>.<signature>`) naming the company, device, register,
+  branch, offline payment methods and an expiry. The expiry is the shorter of the tenant's offline window
+  (`offlineValidityHours`, default 72 h) and the paid-up period (subscription grace/end date, `POS_SALES` module end
+  date). It is renewed on every heartbeat (`POST /pos/devices/heartbeat`). The private key exists only on the server
+  (`POS_LICENSE_PRIVATE_KEY`); in production the API refuses to issue licences without it
+  (`OFFLINE_LICENSING_NOT_CONFIGURED`). The app verifies with the public key built into the installer
+  (`CKH_LICENSE_PUBLIC_KEY` at build time) or, if none was built in, the key pinned at activation; a licence signed by
+  any other key, for another device, expired, or seen after the PC clock was turned back more than 5 minutes behind
+  the latest time the app has seen, stops offline selling.
+- Offline catalogue (`GET /pos/sync/bootstrap`): sellable products with walk-in price, tax rate, barcodes and pack
+  barcodes, categories, offline payment methods, register, open shift, receipt settings. Refreshed while online.
+- Offline till (`/pos/offline/`, Windows app only): opened from the till when the server cannot be reached. Cash only,
+  no discounts, no serial-numbered items; totals use the same `pricePosCart` as the server. Each sale is queued in
+  the encrypted store with the computer's time and a provisional English receipt is printed ("sale number follows").
+- Sync (`POST /pos/sync`): each sale is replayed through the normal checkout in its own transaction, so stock, the
+  drawer and the ledger move as for an online sale, dated when it was made. Idempotent by key (same key and payload
+  returns the first result; a different payload is `CONFLICT`). Refused: another user's sale, another register, a
+  method not allowed offline, a time in the future or outside the device's licence. Recorded but flagged for review
+  (`ACCEPTED_WITH_CHANGES`): price, total or stock different from the server's, a closed or other cashier's shift.
+  Every result is kept in `pos_sync_events`; the app uploads automatically on reconnect and removes settled events.
+- Pages: POS devices (activate this computer, list, licence, last seen, uploads/refusals, revoke) and Offline sync
+  (sales waiting on this computer, upload now, results per device).
+- Tests: 8 API tests (activation and limit, signature and tamper check, licence capped by the subscription, device
+  secret required, catalogue, replay once with the original time, old price kept and flagged, refusals recorded,
+  revoked device refused); 8 desktop unit tests for the licence and queue (wrong key, expiry, clock rollback, renewal,
+  revocation keeps unsent sales, offline methods only). The Electron end-to-end run now also: a manager activates the
+  computer (the store file holds no readable secret or licence), the API is stopped, the cashier sells 2 items for cash
+  on the offline till and the receipt prints (to PDF), the API is restarted, the sale uploads once and is `ACCEPTED`
+  with a real sale number, the device is revoked and the till stops offline selling.
+- Not verified, stated plainly:
+  - Run on Linux only (a development build, with Chromium's fallback key store because the container has no keyring;
+    the installed app refuses that fallback). Windows DPAPI has not been exercised.
+  - Only "server unreachable" was simulated (API stopped). Unplugging the network on a real till, a power cut in the
+    middle of a sale, and sales from several offline tills at once have not been tested.
+  - The offline receipt is English, provisional and has no sale number; whether that meets Cambodian invoice rules
+    needs an accountant's confirmation. Offline cash sales made after the shift was closed are flagged, not added to
+    that shift's count.
+  - Generate the licence key once and keep it secret (PowerShell):
+    `node -e "const k=require('crypto').generateKeyPairSync('ed25519');console.log(Buffer.from(k.privateKey.export({type:'pkcs8',format:'pem'})).toString('base64'))"`
+    then set `$env:POS_LICENSE_PRIVATE_KEY` on the API. Build the installer with
+    `$env:CKH_LICENSE_PUBLIC_KEY` set to the output of `GET /api/v1/pos/license/public-key`.

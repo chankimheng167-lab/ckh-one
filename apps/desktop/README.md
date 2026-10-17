@@ -26,7 +26,17 @@ to the CKH ONE API; it holds no private keys.
   (the till listens for the Enter/Tab suffix).
 - **Encrypted storage** (`secure.dat`): AES-256-GCM, with the data key
   protected by Windows DPAPI for the signed-in user (Electron `safeStorage`).
-  Used by offline mode and device activation.
+  Holds the device secret, the signed offline licence, the offline catalogue
+  and the queue of offline sales. The installed app refuses to run offline
+  mode where the OS cannot protect the key (for example Linux without a
+  keyring).
+- **Offline selling**: a manager activates the computer under POS → Device
+  management. While online the app renews its Ed25519-signed licence and
+  saves the catalogue; when the server cannot be reached the till offers the
+  offline till (cash only), and queued sales upload when it is back. The
+  device secret is added to API calls by the app itself and never reaches the
+  page. A licence for another device, signed by another key, expired, or seen
+  after the clock was turned back stops offline selling.
 - **Updates**: when built with `CKH_UPDATE_URL`, checks for updates on start,
   verifies the SHA-512 and (on Windows) that the update is signed by the same
   publisher, and installs only when the cashier chooses to restart.
@@ -58,6 +68,8 @@ pnpm --filter @ckh/web build
 $env:CSC_LINK = "C:\certs\ckh-codesign.pfx"; $env:CSC_KEY_PASSWORD = "<password>"
 $env:CKH_PUBLISHER_NAME = "Your Company Co., Ltd."
 $env:CKH_UPDATE_URL = "https://downloads.example.com/pos/"
+# Public half of the API's POS_LICENSE_PRIVATE_KEY (GET /api/v1/pos/license/public-key):
+$env:CKH_LICENSE_PUBLIC_KEY = (Invoke-RestMethod "https://api.example.com/api/v1/pos/license/public-key").publicKey
 pnpm --filter @ckh/desktop dist:win
 ```
 
@@ -79,5 +91,8 @@ are changed from POS → Printer settings → This computer).
   sign-in, a cash sale printed silently (to PDF in test mode), a network
   ESC/POS printer (a local TCP listener) receiving the receipt, cut and drawer
   pulse, a printer that is off, navigation and window-opening refused, the API
-  address not changeable from the page. Run it with
+  address not changeable from the page. With `CKH_E2E_API_STOP` and
+  `CKH_E2E_API_START` (commands that stop and start the API) it also activates
+  the computer, stops the API, sells on the offline till, restarts the API,
+  checks the sale uploads once, then revokes the device. Run it with
   `CKH_APP_EXE=release/linux-unpacked/ckh-one-pos` against the packaged build too.

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
 import { MODULES, P } from '@ckh/shared';
 import { z } from 'zod';
-import { CurrentUser, has, RequireModules, RequirePermissions, TenantUser } from '../common/auth-context';
+import { CurrentUser, has, Public, RequireModules, RequirePermissions, TenantUser } from '../common/auth-context';
 import { AuditService } from '../common/audit.service';
 import { decimalString, isoDate, parse, uuid } from '../common/validation';
 import { DatabaseService } from '../db/database.service';
@@ -644,8 +644,9 @@ export class PosDevicesController {
     return this.db.withTenant(user.tenantId, user.userId, async (tx) => this.devices.heartbeat(tx, user, await this.devices.authenticate(tx, device), i));
   }
 
+  /** The licence verification key is public (the installer build embeds it); the private key never leaves the server. */
   @Get('license/public-key')
-  @RequirePermissions(P.POS_ACCESS)
+  @Public()
   publicKey() {
     return { algorithm: 'Ed25519', publicKey: this.licenses.publicKeyPem() };
   }

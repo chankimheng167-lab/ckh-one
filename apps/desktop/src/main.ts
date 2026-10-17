@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain, IpcMainEvent, IpcMainInvokeEvent, protocol, safeStorage, session, WebContents } from 'electron';
+import { randomUUID } from 'crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { extname, join, resolve, sep } from 'path';
 import { DesktopConfig, loadConfig, PrinterConfig, saveConfig, sanitize } from './config';
 import { openDrawerBytes, receipt } from './escpos';
 import { sendRaw } from './network-printer';
+import { OfflineVault } from './offline';
 import { APP_ORIGIN, csp, isAppUrl, resolveAppPath } from './security';
 import { SecureStore } from './secure-store';
 import { checkForUpdates } from './updates';
@@ -24,16 +26,17 @@ const log = (m: string) => {
 let config: DesktopConfig;
 let win: BrowserWindow | null = null;
 let store: SecureStore;
+let vault: OfflineVault;
 
 /** The bundled web app: resources/web when installed, apps/web/out in development. */
 const webDir = () => resolve(process.env.CKH_WEB_DIR ?? (app.isPackaged ? join(process.resourcesPath, 'web') : join(__dirname, '..', '..', 'web', 'out')));
 
-/** The API address the bundled web build was made for (written by scripts/copy-web.js). */
-function builtForApi(): string | undefined {
+/** What the bundled web build was made for (written by scripts/copy-web.js): API address and licence key. */
+function builtFor(): { apiUrl?: string; licensePublicKey?: string } {
   try {
-    return JSON.parse(readFileSync(join(webDir(), 'ckh-desktop.json'), 'utf8')).apiUrl;
+    return JSON.parse(readFileSync(join(webDir(), 'ckh-desktop.json'), 'utf8'));
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -141,6 +144,43 @@ function ipc() {
     await sendRaw(p.host, p.port, openDrawerBytes(p.drawerPin));
     return { opened: true };
   });
+  // Offline selling. The device secret never leaves this process: it is added
+  // to the till's API calls below, in sendDeviceHeader.
+  handle('ckh:device:status', () => ({ ...vault.status(), apiMatches: vault.device()?.apiUrl === config.apiUrl }));
+  handle('ckh:device:activate', async (accessToken: unknown, body: { registerId?: unknown; name?: unknown }) => {
+    if (typeof accessToken !== 'string' || accessToken.length > 4000) throw new Error('Sign in first');
+    let installId = store.get<string>('installId');
+    if (!installId) {
+      installId = `pc-${randomUUID()}`;
+      store.set('installId', installId);
+    }
+    const res = await fetch(`${config.apiUrl}/pos/devices/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ registerId: body?.registerId, name: body?.name, deviceKey: installId, platform: process.platform, appVersion: app.getVersion() }),
+    });
+    const r = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) throw new Error(r?.error?.message ?? `Activation failed (${res.status})`);
+    vault.activate({ deviceId: r.deviceId, deviceSecret: r.deviceSecret, registerId: r.registerId, apiUrl: config.apiUrl, publicKey: r.publicKey }, r.license);
+    reloadDevice();
+    log(`device activated ${r.deviceId}`);
+    return vault.status();
+  });
+  handle('ckh:device:renew', (token: unknown, publicKey: unknown) => {
+    if (typeof token !== 'string') throw new Error('Licence is not valid');
+    return vault.renew(token, typeof publicKey === 'string' ? publicKey : undefined);
+  });
+  handle('ckh:device:revoked', () => {
+    vault.revoked();
+    log('device revoked by the server');
+    return vault.status();
+  });
+  handle('ckh:offline:snapshot:save', (snap: unknown) => vault.saveSnapshot(snap));
+  handle('ckh:offline:snapshot', () => vault.snapshot() ?? null);
+  handle('ckh:offline:enqueue', (e: any) => vault.enqueue(e));
+  handle('ckh:offline:queue', () => vault.queue());
+  handle('ckh:offline:settle', (results: any) => vault.settle(results));
+  handle('ckh:offline:refused', () => vault.refused());
   handle('ckh:print:test', async () => {
     const p = config.printer;
     const text = ['CKH ONE POS', 'Printer test', new Date().toLocaleString('en-GB'), ''].join('\n');
@@ -151,6 +191,26 @@ function ipc() {
     }
     if (p.mode === 'none') return { printed: false, reason: 'Printing is turned off on this computer' };
     return printHtml(`<pre style="font:12px monospace">${text}</pre>`, p.paper, p);
+  });
+}
+
+/** The device identity in memory, so the request hook never touches the encrypted file. */
+let deviceCache: ReturnType<OfflineVault['device']>;
+const reloadDevice = () => {
+  deviceCache = vault.device();
+};
+
+/** Adds "X-POS-Device: <id>:<secret>" to the till's POS calls to its own API, and nowhere else. */
+function sendDeviceHeader() {
+  const origin = new URL(config.apiUrl).origin;
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [`${origin}/*`] }, (details, cb) => {
+    const d = deviceCache;
+    const headers = { ...details.requestHeaders };
+    delete headers['X-POS-Device'];
+    if (d && d.apiUrl === config.apiUrl && details.url.startsWith(`${config.apiUrl}/pos/`) && details.method !== 'OPTIONS') {
+      headers['X-POS-Device'] = `${d.deviceId}:${d.deviceSecret}`;
+    }
+    cb({ requestHeaders: headers });
   });
 }
 
@@ -198,16 +258,29 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('web-contents-created', (_e, contents) => lockDown(contents));
   app.whenReady().then(() => {
-    config = loadConfig(configFile(), builtForApi(), app.isPackaged ? undefined : process.env.CKH_API_URL);
+    const built = builtFor();
+    config = loadConfig(configFile(), built.apiUrl, app.isPackaged ? undefined : process.env.CKH_API_URL);
+    // Development and tests on Linux without a keyring only; the installed app never does this.
+    if (!app.isPackaged && process.platform === 'linux' && process.env.CKH_DEV_PLAINTEXT_KEYSTORE === '1') safeStorage.setUsePlainTextEncryption(true);
     store = new SecureStore(join(app.getPath('userData'), 'secure.dat'), {
-      available: () => safeStorage.isEncryptionAvailable(),
+      // Linux without a keyring falls back to a fixed built-in key ("basic_text"): not encryption, so the
+      // installed app refuses it. Windows always uses DPAPI. Development runs may use it for tests.
+      available: () =>
+        safeStorage.isEncryptionAvailable() &&
+        !(process.platform === 'linux' && app.isPackaged && safeStorage.getSelectedStorageBackend() === 'basic_text'),
       encrypt: (b) => safeStorage.encryptString(b.toString('base64')),
       decrypt: (b) => Buffer.from(safeStorage.decryptString(b), 'base64'),
     });
-    void store;
+    vault = new OfflineVault(store, built.licensePublicKey);
+    try {
+      reloadDevice();
+    } catch (e) {
+      log(`secure store: ${(e as Error).message}`);
+    }
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     serveApp();
+    sendDeviceHeader();
     ipc();
     createWindow();
     void checkForUpdates(log);
@@ -215,4 +288,3 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => app.quit());
 }
 
-export { store };

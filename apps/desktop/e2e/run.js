@@ -10,8 +10,14 @@
  * CKH_APP_EXE=release/linux-unpacked/ckhdesktop runs the packaged app instead
  * (it reads its settings from config.json, and prints to a real printer, so
  * the PDF step is skipped).
+ *
+ * With CKH_E2E_API_STOP and CKH_E2E_API_START (shell commands that stop and
+ * start the API) it also sells offline: a manager activates the computer, the
+ * API goes down, the cashier sells for cash on the offline till, the API comes
+ * back and the queued sale uploads; then the device is revoked.
  */
-const { mkdtempSync, readdirSync, statSync, writeFileSync } = require('fs');
+const { execSync } = require('child_process');
+const { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } = require('fs');
 const { createServer } = require('net');
 const { tmpdir } = require('os');
 const { join } = require('path');
@@ -38,8 +44,9 @@ const step = async (name, fn) => {
   if (packaged) writeFileSync(join(userData, 'config.json'), JSON.stringify({ apiUrl: API, printer: { mode: 'none' } }));
   const app = await electron.launch({
     executablePath: packaged ? process.env.CKH_APP_EXE : require('electron'),
-    args: packaged ? ['--no-sandbox'] : ['--no-sandbox', join(__dirname, '..')],
-    env: { ...process.env, CKH_USER_DATA: userData, CKH_API_URL: API, CKH_PRINT_TO_PDF_DIR: pdfDir, CKH_DISABLE_UPDATES: '1' },
+    // No keyring on a CI Linux box: development builds may use Chromium's basic store (the installed app refuses it).
+    args: packaged ? ['--no-sandbox'] : ['--no-sandbox', '--password-store=basic', join(__dirname, '..')],
+    env: { ...process.env, CKH_USER_DATA: userData, CKH_API_URL: API, CKH_PRINT_TO_PDF_DIR: pdfDir, CKH_DISABLE_UPDATES: '1', CKH_DEV_PLAINTEXT_KEYSTORE: '1' },
   });
   const page = await app.firstWindow();
   const errors = [];
@@ -56,11 +63,28 @@ const step = async (name, fn) => {
       }));
       if (!r.desktop || r.api !== API || r.req !== 'undefined' || r.proc !== 'undefined' || r.buf !== 'undefined') throw new Error(JSON.stringify(r));
     });
-    await step('signs in as the cashier through the configured API', async () => {
+    const signIn = async (email) => {
+      for (let i = 0; i < 40 && !(await page.getByLabel('Company code').isVisible().catch(() => false)); i++) await page.waitForTimeout(250);
       await page.getByLabel('Company code').fill('demo');
-      await page.locator('input[type=email], input[autocomplete=username]').first().fill('cashier@demo.ckh.one');
+      await page.locator('input[type=email], input[autocomplete=username]').first().fill(email);
       await page.locator('input[type=password]').fill('ChangeMe!2026');
       await page.getByRole('button', { name: /sign in/i }).click();
+      for (let i = 0; i < 60 && page.url().includes('/login'); i++) await page.waitForTimeout(250);
+    };
+    /** Navigates inside the app; retries while a redirect is still in flight. */
+    const go = async (path, before = '') => {
+      for (let i = 0; ; i++) {
+        try {
+          return await page.evaluate(([p, b]) => { if (b === 'clearSession') sessionStorage.clear(); location.href = p; }, [path, before]);
+        } catch (e) {
+          if (i > 10) throw e;
+          await page.waitForTimeout(300);
+        }
+      }
+    };
+    const signOut = () => page.evaluate(() => { localStorage.removeItem('ckh.session'); localStorage.removeItem('ckh.me'); location.href = '/login/'; });
+    await step('signs in as the cashier through the configured API', async () => {
+      await signIn('cashier@demo.ckh.one');
       await page.waitForURL(/\/pos\/$/, { timeout: 15000 });
     });
     const sell = async () => {
@@ -106,6 +130,77 @@ const step = async (name, fn) => {
       await sell();
       await page.getByText(/Receipt not printed/).waitFor({ timeout: 15000 });
     });
+    if (process.env.CKH_E2E_API_STOP && process.env.CKH_E2E_API_START) {
+      const pcName = `E2E till ${Date.now()}`;
+      const status = () => page.evaluate(() => window.ckhPos.device.status()).catch(() => ({ license: {} }));
+      const poll = async (fn, what, n = 60) => {
+        for (let i = 0; i < n; i++) {
+          const v = await fn();
+          if (v) return v;
+          await page.waitForTimeout(500);
+        }
+        throw new Error(`timed out: ${what}`);
+      };
+      await step('a manager activates this computer; the secret stays in the app, encrypted', async () => {
+        await signOut();
+        await signIn('posmanager@demo.ckh.one');
+        await go('/pos/devices/');
+        await page.getByLabel('Name of this computer').fill(pcName);
+        await page.getByRole('button', { name: 'Activate this computer' }).click();
+        await page.getByText(/Allowed until/).waitFor({ timeout: 15000 });
+        const st = await status();
+        if (!st.activated || !st.license.valid || JSON.stringify(st).includes('Secret')) throw new Error(JSON.stringify(st));
+        const file = readFileSync(join(userData, 'secure.dat'), 'utf8');
+        if (/deviceSecret|ckhpos1|BEGIN PUBLIC KEY/.test(file)) throw new Error('secure store is not encrypted');
+        await page.locator('tr', { hasText: pcName }).getByText('Active').waitFor();
+      });
+      await step('the cashier’s till saves the offline catalogue and licence while online', async () => {
+        await signOut();
+        await signIn('cashier@demo.ckh.one');
+        await go('/pos/', 'clearSession');
+        await poll(async () => (await status()).snapshotAt, 'catalogue saved');
+      });
+      let pdfsBefore = 0;
+      await step('API down: the till offers the offline till, which sells for cash and prints', async () => {
+        await page.evaluate(() => window.ckhPos.savePrinterSettings({ mode: 'system', drawer: false }));
+        pdfsBefore = readdirSync(pdfDir).length;
+        execSync(process.env.CKH_E2E_API_STOP, { stdio: 'ignore' });
+        await go('/pos/sell/');
+        await page.getByRole('link', { name: 'Open the offline till' }).click({ timeout: 20000 });
+        await page.locator('.prod', { hasText: 'Iced Coffee' }).click();
+        await page.locator('.prod', { hasText: 'Iced Coffee' }).click();
+        await page.screenshot({ path: join(tmpdir(), 'ckh-offline-till.png') });
+        await page.locator('.pay').click();
+        await page.locator('.sheet .methods button').last().click();
+        await page.getByTestId('offline-change').waitFor();
+        const q = await page.evaluate(() => window.ckhPos.offline.queue());
+        if (q.length !== 1 || q[0].sale.lines[0].quantity !== '2') throw new Error(JSON.stringify(q));
+        if (!packaged) await poll(() => readdirSync(pdfDir).length > pdfsBefore, 'offline receipt printed', 20);
+        // The clock check: a licence cannot be stretched by turning the PC clock back (unit-tested); a refused method is refused.
+        const bad = await page.evaluate((e) => window.ckhPos.offline.enqueue(e).then(() => 'queued', (err) => err.message), { ...q[0], idempotencyKey: 'evt-bad-method-1', sale: { ...q[0].sale, payments: [{ methodId: '00000000-0000-4000-8000-000000000000', amount: '1' }] } });
+        if (!/allowed offline/.test(bad)) throw new Error(bad);
+      });
+      await step('API back: the queued sale uploads once and becomes a real sale', async () => {
+        execSync(process.env.CKH_E2E_API_START, { stdio: 'ignore' });
+        await go('/pos/');
+        await poll(async () => (await status()).queued === 0, 'queue uploaded');
+        const login = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenantCode: 'demo', email: 'posmanager@demo.ckh.one', password: 'ChangeMe!2026' }) }).then((r) => r.json());
+        const h = { Authorization: `Bearer ${login.accessToken}` };
+        const ev = (await fetch(`${API}/pos/sync/events`, { headers: h }).then((r) => r.json())).filter((e) => e.device_name === pcName);
+        if (ev.length !== 1 || ev[0].status !== 'ACCEPTED' || !/^POS-/.test(ev[0].sale_number)) throw new Error(JSON.stringify(ev));
+        const devices = await fetch(`${API}/pos/devices`, { headers: h }).then((r) => r.json());
+        const me = devices.find((d) => d.name === pcName);
+        const rv = await fetch(`${API}/pos/devices/${me.id}/revoke`, { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: '{}' });
+        if (rv.status !== 200) throw new Error(`revoke ${rv.status}`);
+      });
+      await step('a revoked computer stops offline selling at its next check-in', async () => {
+        await go('/pos/', 'clearSession');
+        await poll(async () => (await status()).license.reason === 'REVOKED', 'revoked');
+        await page.getByText(/revoked this computer/).waitFor();
+        const r = await page.evaluate(() => window.ckhPos.offline.enqueue({}).then(() => 'queued', (e) => e.message));
+        if (!/REVOKED/.test(r)) throw new Error(r);
+      });
+    }
     await step('the window cannot be sent to another site or open new windows', async () => {
       const before = page.url();
       await page.evaluate(() => { location.href = 'https://example.com/'; });

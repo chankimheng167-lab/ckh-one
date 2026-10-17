@@ -20,4 +20,20 @@ contextBridge.exposeInMainWorld('ckhPos', {
   printText: (text: string, opts?: { openDrawer?: boolean }) => ipcRenderer.invoke('ckh:print:text', text, opts ?? {}),
   openDrawer: () => ipcRenderer.invoke('ckh:drawer:open'),
   testPrint: () => ipcRenderer.invoke('ckh:print:test'),
+  /** This computer as a POS device: activation and its signed offline licence. */
+  device: {
+    status: () => ipcRenderer.invoke('ckh:device:status'),
+    activate: (accessToken: string, body: { registerId: string; name: string }) => ipcRenderer.invoke('ckh:device:activate', accessToken, body),
+    renew: (token: string, publicKey?: string) => ipcRenderer.invoke('ckh:device:renew', token, publicKey),
+    revoked: () => ipcRenderer.invoke('ckh:device:revoked'),
+  },
+  /** Offline selling: catalogue snapshot and the queue of sales waiting to upload. */
+  offline: {
+    saveSnapshot: (s: unknown) => ipcRenderer.invoke('ckh:offline:snapshot:save', s),
+    snapshot: () => ipcRenderer.invoke('ckh:offline:snapshot'),
+    enqueue: (e: unknown) => ipcRenderer.invoke('ckh:offline:enqueue', e),
+    queue: () => ipcRenderer.invoke('ckh:offline:queue'),
+    settle: (results: unknown) => ipcRenderer.invoke('ckh:offline:settle', results),
+    refused: () => ipcRenderer.invoke('ckh:offline:refused'),
+  },
 });

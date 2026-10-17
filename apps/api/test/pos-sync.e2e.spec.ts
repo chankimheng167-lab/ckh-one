@@ -70,6 +70,11 @@ describe('POS devices, offline licences and offline sync', () => {
     expect(check(`${p}.${forged}.${s}`, device.publicKey).ok).toBe(false);
     void b;
 
+    // Anyone can fetch the verification key (installers embed it); it is the one licences verify with.
+    const pub = await api.get('/pos/license/public-key');
+    expect(pub.status).toBe(200);
+    expect(pub.body.publicKey).toBe(device.publicKey);
+
     expect((await manager().post('/pos/devices/activate', body)).body.error.code).toBe('DEVICE_ALREADY_ACTIVE');
     await sql('INSERT INTO pos_licenses (tenant_id, max_devices) VALUES ($1, 1) ON CONFLICT (tenant_id) DO UPDATE SET max_devices = 1', [co.tenantId]);
     const over = await manager().post('/pos/devices/activate', { ...body, deviceKey: `pc-${randomUUID()}` });
@@ -95,7 +100,7 @@ describe('POS devices, offline licences and offline sync', () => {
   it('device calls need the device secret', async () => {
     expect((await cashier().post('/pos/devices/heartbeat', {})).body.error.code).toBe('DEVICE_REQUIRED');
     const wrong = await cashier().post('/pos/devices/heartbeat', {}, header({ ...device, deviceSecret: 'x'.repeat(43) }));
-    expect(wrong.status).toBe(401);
+    expect(wrong.status).toBe(403);
     expect(wrong.body.error.code).toBe('DEVICE_UNKNOWN');
   });
 
