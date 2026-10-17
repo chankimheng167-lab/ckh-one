@@ -112,7 +112,7 @@ async function send(method: string, path: string, body: unknown, token: string |
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, store: Store = tokenStore, loginPath = '/login/'): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, store: Store = tokenStore, loginPath = '/login/', raw = false): Promise<T> {
   const isAuthCall = path.startsWith('/auth/login') || path.startsWith('/auth/platform/login') || path.startsWith('/auth/refresh');
   if (!isAuthCall && !store.get() && store.hasSession()) await store.refresh();
   let res = await send(method, path, body, store.get());
@@ -125,6 +125,7 @@ async function request<T>(method: string, path: string, body?: unknown, store: S
     if (typeof window !== 'undefined' && !location.pathname.startsWith(loginPath.replace(/\/$/, ''))) location.href = loginPath;
   }
   const text = await res.text();
+  if (raw && res.ok) return text as T;
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
     const e = data?.error ?? {};
@@ -138,6 +139,8 @@ export const api = {
   post: <T = any>(p: string, b: unknown = {}) => request<T>('POST', p, b),
   put: <T = any>(p: string, b: unknown = {}) => request<T>('PUT', p, b),
   del: <T = any>(p: string) => request<T>('DELETE', p),
+  /** POST that returns the response body as text (HTML receipts, CSV). */
+  postText: (p: string, b: unknown = {}) => request<string>('POST', p, b, tokenStore, '/login/', true),
   /** Downloads a report export and hands it to the browser. */
   async download(path: string, filename: string) {
     if (!tokenStore.get()) await tokenStore.refresh();

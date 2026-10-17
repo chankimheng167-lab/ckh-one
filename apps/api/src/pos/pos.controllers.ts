@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
 import { MODULES, P } from '@ckh/shared';
 import { z } from 'zod';
 import { CurrentUser, has, RequireModules, RequirePermissions, TenantUser } from '../common/auth-context';
@@ -13,6 +13,21 @@ import { HoldInput, PosHeldService } from './pos-held.service';
 import { CheckoutInput, PosCartInput, SalesQuery } from './pos-schemas';
 import { PosSalesService } from './pos-sales.service';
 import { PosShiftsService } from './pos-shifts.service';
+import { PosReceiptsService, PrintInput } from './pos-receipts.service';
+import { DailyQuery, PosReportsService } from './pos-reports.service';
+import { PosReturnsService, ReturnInput, ReturnsQuery } from './pos-returns.service';
+
+interface Response { setHeader(name: string, value: string): void; end(body: string | Buffer): void }
+
+/** Sends a rendered receipt: JSON as data, anything else as the document itself. */
+function sendReceipt(res: Response, r: { body: string | Buffer; contentType: string; copyNo: number; model: { number: string } }, format: string) {
+  if (format === 'json') return { copyNo: r.copyNo, receipt: JSON.parse(r.body as string) };
+  res.setHeader('Content-Type', r.contentType);
+  res.setHeader('X-Receipt-Copy', String(r.copyNo));
+  if (format === 'pdf') res.setHeader('Content-Disposition', `inline; filename="${r.model.number}.pdf"`);
+  res.end(r.body);
+  return undefined;
+}
 
 const RegisterQuery = z.object({ registerId: uuid });
 const CatalogQuery = z.object({
@@ -435,5 +450,99 @@ export class PosAdminController {
                 (SELECT count(*)::int FROM pos_devices WHERE status = 'ACTIVE') AS devices`,
       ),
     }));
+  }
+}
+
+/** Returns and refunds, receipts and the daily report. */
+@RequireModules(MODULES.POS_SALES)
+@Controller('pos')
+export class PosDocumentsController {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly returns: PosReturnsService,
+    private readonly receipts: PosReceiptsService,
+    private readonly reports: PosReportsService,
+  ) {}
+
+  /** What can still be returned from a sale (lines and refundable amount per payment method). */
+  @Get('sales/:id/returnable')
+  @RequirePermissions(P.POS_SALES_CREATE)
+  returnable(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.returns.returnable(tx, user, id));
+  }
+
+  /** Finds a sale by its receipt number (the number printed on the customer's receipt). */
+  @Get('sales/by-number/:number')
+  @RequirePermissions(P.POS_SALES_CREATE)
+  byNumber(@CurrentUser() user: TenantUser, @Param('number') number: string) {
+    const n = parse(z.string().trim().min(3).max(40), number);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const s = await tx.maybeOne<{ id: string }>('SELECT id FROM pos_sales WHERE upper(number) = upper($1)', [n]);
+      if (!s) return { found: false };
+      return { found: true, ...(await this.returns.returnable(tx, user, s.id)) };
+    });
+  }
+
+  @Post('returns/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_SALES_CREATE)
+  preview(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(z.object({ saleId: uuid, lines: z.array(z.object({ saleLineId: uuid, quantity: decimalString })).min(1).max(500) }), body);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      await this.returns.returnable(tx, user, i.saleId);
+      return this.returns.preview(tx, i.saleId, i.lines);
+    });
+  }
+
+  /** Records a return: refund, stock back, drawer and ledger in one transaction (refund permission or a supervisor PIN). */
+  @Post('returns')
+  @RequirePermissions(P.POS_SALES_CREATE)
+  createReturn(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(ReturnInput, body);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.returns.create(tx, user, i));
+  }
+
+  @Get('returns')
+  @RequirePermissions(P.POS_ACCESS)
+  listReturns(@CurrentUser() user: TenantUser, @Query() query: unknown) {
+    const q = parse(ReturnsQuery, query);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.returns.list(tx, user, q));
+  }
+
+  @Get('returns/:id')
+  @RequirePermissions(P.POS_ACCESS)
+  getReturn(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.returns.details(tx, user, id));
+  }
+
+  /** Prints (and logs) a sale receipt; a second print is a reprint and needs permission or a supervisor PIN. */
+  @Post('sales/:id/receipt')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_ACCESS)
+  async saleReceipt(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const i = parse(PrintInput, body ?? {});
+    const r = await this.db.withTenant(user.tenantId, user.userId, (tx) => this.receipts.print(tx, user, { saleId: id }, i));
+    return sendReceipt(res, r, i.format);
+  }
+
+  @Post('returns/:id/receipt')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_ACCESS)
+  async returnReceipt(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const i = parse(PrintInput, body ?? {});
+    const r = await this.db.withTenant(user.tenantId, user.userId, (tx) => this.receipts.print(tx, user, { returnId: id }, i));
+    return sendReceipt(res, r, i.format);
+  }
+
+  @Get('reports/daily')
+  @RequirePermissions(P.POS_REPORTS_VIEW)
+  async daily(@CurrentUser() user: TenantUser, @Query() query: unknown, @Res({ passthrough: true }) res: Response) {
+    const { format, ...q } = parse(DailyQuery.extend({ format: z.enum(['json', 'csv']).default('json') }), query);
+    const r = await this.db.withTenant(user.tenantId, user.userId, (tx) => this.reports.daily(tx, user, q));
+    if (format === 'json') return r;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="pos-daily-${r.from}${r.to !== r.from ? `_${r.to}` : ''}.csv"`);
+    res.end(`\ufeff${this.reports.toCsv(r)}`);
+    return undefined;
   }
 }

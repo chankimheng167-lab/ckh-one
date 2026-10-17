@@ -444,6 +444,7 @@ CREATE TABLE pos_returns (
   tenant_id          uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   number             text NOT NULL,
   client_return_id   text NOT NULL CHECK (length(client_return_id) BETWEEN 8 AND 100),
+  payload_hash       text NOT NULL,
   sale_id            uuid NOT NULL,
   register_id        uuid NOT NULL,
   shift_id           uuid,

@@ -123,7 +123,7 @@ the API; menus only hide what the API would refuse anyway.
 | 1 | Audit, database design, architecture, shared POS money logic | ✅ |
 | 2 | POS backend: registers, catalogue, checkout transaction, permissions, inventory | ✅ |
 | 3 | Touchscreen POS screen and payment workflow | ✅ |
-| 4 | Receipts, returns/refunds, shifts, reports | |
+| 4 | Receipts, returns/refunds, shifts, reports | ✅ |
 | 5 | Accounting integration and reconciliation | |
 | 6 | Windows desktop POS and hardware | |
 | 7 | Offline sync and device licensing | |
@@ -171,3 +171,35 @@ the API; menus only hide what the API would refuse anyway.
   barcode, pick a variant, enter a serial, discount above the cashier limit, split card + cash payment with supervisor PIN,
   sale details, hold and resume, cash out, close shift. All steps passed.
 - The web till is online-only by design; offline selling is the Windows app (phase 7). Receipts print in phase 4.
+
+### Phase 4 — done
+- Returns and refunds (`POST /pos/returns`, preview, list, details, `GET /pos/sales/:id/returnable`, lookup by receipt
+  number): partial or full returns of a sale, priced proportionally by the shared `refundForLine` (discount and VAT come
+  back in the same share), never more than was sold. Refund permission or a supervisor PIN; each refund goes back only
+  to tenders that were confirmed on that sale and up to what they paid; non-cash refunds need a reference; a cash refund
+  needs enough cash in the drawer. Restock or mark damaged per line; serial numbers must be named, belong to the sale and
+  be returned only once. One transaction writes the return, stock back at the sale's cost, a negative drawer movement
+  and a balanced `POS_RETURN` journal (revenue, discount, VAT, tender, inventory/COGS). Idempotent on `clientReturnId`.
+- Receipts (`POST /pos/sales/:id/receipt`, `POST /pos/returns/:id/receipt`): 58 mm, 80 mm and A4, as HTML, PDF or plain
+  text, in English, Khmer and Chinese (one or two languages side by side). The first print is the original; every later
+  print is marked REPRINT, needs reprint permission or a supervisor PIN, and is audited. Every print is logged in
+  `pos_receipts`. Header, footer, logo and TIN come from receipt settings. The web till prints the original by itself
+  after a sale (switchable per register) through the browser print dialog.
+- Daily sales report (`GET /pos/reports/daily`, JSON or CSV): totals, refunds, net after refunds, margin, by register,
+  cashier, payment method (confirmed, waiting for verification, refunded), hour, category, top products, VAT by rate
+  with returned VAT, shifts with cash differences, and approved discounts. Limited to the user's branches; CSV cells
+  that look like formulas are neutralised.
+- Pages: returns (lookup and list), new return, return details, receipt print and preview (paper and language), daily
+  report with CSV download, receipt settings.
+- 15 end-to-end tests in `apps/api/test/pos-returns.e2e.spec.ts`; API suite 141/141.
+- Browser run-through (Chromium): cash sale, automatic original print, reprint with supervisor PIN, receipt page,
+  return of one item with supervisor PIN, return details, daily report and CSV as supervisor, receipt settings as
+  manager. All steps passed; the database showed ORIGINAL, REPRINT and REFUND prints logged.
+- Limits, stated plainly:
+  - Receipt printing was tested only as far as the browser print call and the rendered HTML; no physical receipt
+    printer has been tested. Silent printing, ESC/POS and the cash drawer belong to the Windows app (phase 6).
+  - Plain-text receipts are English only. Khmer and Chinese PDFs need a font installed on the server
+    (`RECEIPT_FONT_KM`, `RECEIPT_FONT_ZH` paths to TTF/OTF files); without one the API refuses the PDF and HTML is used.
+  - The Khmer and Chinese receipt labels were written by us and need checking by a native speaker before customer use.
+  - Refunds to bank, QR or card are recorded with a reference; the money is sent back outside CKH ONE. No payment
+    provider is integrated.

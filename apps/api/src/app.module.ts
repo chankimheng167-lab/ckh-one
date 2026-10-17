@@ -48,7 +48,10 @@ import { SyncService } from './sales/sync/sync.service';
 import { ThemeController } from './core/theme/theme.controller';
 import { ReportsController } from './sales/reports/reports.controller';
 import { ReportsService } from './sales/reports/reports.service';
-import { PosAdminController, PosController, PosShiftsController } from './pos/pos.controllers';
+import { PosAdminController, PosController, PosDocumentsController, PosShiftsController } from './pos/pos.controllers';
+import { PosReceiptsService } from './pos/pos-receipts.service';
+import { PosReportsService } from './pos/pos-reports.service';
+import { PosReturnsService } from './pos/pos-returns.service';
 import { PosAdminService } from './pos/pos-admin.service';
 import { PosCatalogService } from './pos/pos-catalog.service';
 import { PosContextService } from './pos/pos-context.service';
@@ -101,6 +104,7 @@ export class CoreInfraModule {}
     PosController,
     PosShiftsController,
     PosAdminController,
+    PosDocumentsController,
   ],
   providers: [
     SessionService,
@@ -127,6 +131,9 @@ export class CoreInfraModule {}
     PosShiftsService,
     PosHeldService,
     PosAdminService,
+    PosReturnsService,
+    PosReceiptsService,
+    PosReportsService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

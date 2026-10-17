@@ -6,6 +6,8 @@ import { ErrorBox, Field } from '@/components/ui';
 import { api, ApiError, qs } from '@/lib/api';
 import { money, num } from '@/lib/format';
 import { useAction, useApi } from '@/lib/hooks';
+import { ApprovalSheet } from '@/components/PosApproval';
+import { printReceipt } from '@/lib/receipt';
 import { type Cart, type CartLine, cartPayload, emptyCart, newKey, type PosMethod, posMessage, quickCash, takeResume } from '@/lib/pos';
 
 const CART_KEY = 'ckh.pos.cart';
@@ -886,33 +888,6 @@ function FragmentRow({ label, value, onRemove }: { label: string; value: string;
   );
 }
 
-const NEED_LABEL: Record<string, string> = {
-  'pos.discount.apply': 'give a discount',
-  'pos.discount.override': 'give a discount above the cashier limit',
-  'pos.price.override': 'change a price',
-};
-
-/** A supervisor approves on the cashier's screen with their own PIN. */
-function ApprovalSheet({ registerId, needs, onApprove, onClose }: { registerId: string; needs: string[]; onApprove: (a: { userId: string; pin: string }) => void; onClose: () => void }) {
-  const { data, error } = useApi<any[]>(`/pos/approvers${qs({ registerId })}`);
-  const [who, setWho] = useState<string>('');
-  const [pin, setPin] = useState('');
-  return (
-    <Sheet title="Supervisor approval" onClose={onClose}>
-      <p className="small">This sale needs someone allowed to {needs.map((n) => NEED_LABEL[n] ?? n).join(' and ')}.</p>
-      <ErrorBox error={error} />
-      <Field label="Supervisor">
-        <select value={who} onChange={(e) => setWho(e.target.value)}>
-          <option value="">Choose…</option>
-          {(data ?? []).filter((u) => needs.every((n) => u.can?.includes(n))).map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-        </select>
-      </Field>
-      <Keypad value={pin} onChange={(v) => setPin(v.slice(0, 8))} decimals={false} mask />
-      <button className="primary" disabled={!who || pin.length < 4} onClick={() => onApprove({ userId: who, pin })}>Approve</button>
-    </Sheet>
-  );
-}
-
 function OpenShiftInline() {
   const pos = usePos();
   const [float, setFloat] = useState('');
@@ -935,12 +910,35 @@ function OpenShiftInline() {
 }
 
 function Done({ result, onNext }: { result: any; onNext: () => void }) {
+  const pos = usePos();
   const s = result.sale;
+  const hw = pos.ctx.register?.hardware ?? {};
+  const [printed, setPrinted] = useState(false);
+  const [askPin, setAskPin] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+  async function print(approval?: { userId: string; pin: string }) {
+    setPrintError(null);
+    try {
+      await printReceipt({ saleId: s.id, approval });
+      setPrinted(true);
+    } catch (e) {
+      const err = e as ApiError;
+      if (err.code === 'APPROVAL_REQUIRED') setAskPin(true);
+      else setPrintError(err.message);
+    }
+  }
+  // The original receipt prints by itself when the register is set to (a replayed sale was printed already).
+  const auto = useRef(false);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Enter' && onNext();
+    if (auto.current || result.replayed || hw.autoPrint === false) return;
+    auto.current = true;
+    void print();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Enter' && !askPin && onNext();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [onNext]);
+  }, [onNext, askPin]);
   return (
     <div className="pos-center" style={{ maxWidth: 560 }}>
       <div className="notice ok">
@@ -958,10 +956,22 @@ function Done({ result, onNext }: { result: any; onNext: () => void }) {
         )}
       </div>
       {result.warnings?.map((w: any, i: number) => <div key={i} className="notice warn small">{w.message}</div>)}
+      {printError && <div className="notice bad small">Receipt not printed: {printError}</div>}
       <div className="row">
-        <a className="btn" href={`/pos/sales/view/?id=${s.id}&receipt=1`}>Receipt</a>
+        <button onClick={() => print()}>{printed ? 'Reprint receipt' : 'Print receipt'}</button>
         <button className="primary" style={{ minHeight: 60, flex: 1 }} onClick={onNext}>New sale</button>
       </div>
+      {askPin && (
+        <ApprovalSheet
+          registerId={pos.ctx.register!.id}
+          needs={['pos.receipts.reprint']}
+          onClose={() => setAskPin(false)}
+          onApprove={(a) => {
+            setAskPin(false);
+            void print(a);
+          }}
+        />
+      )}
     </div>
   );
 }

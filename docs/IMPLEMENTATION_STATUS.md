@@ -2,9 +2,11 @@
 
 _Last updated: 2026-10-17 · all 5 SFA phases built · platform security hardening (stage 1) done_
 
-> This file covers the **Sales Force Automation** module and the platform core it runs on. The rest of
-> CKH ONE (POS, Windows POS, retail, restaurant, hotel, HR, purchasing, full accounting, tax) is not built
-> yet: see [AUDIT_REPORT.md](AUDIT_REPORT.md) for the full comparison and roadmap.
+> This file covers the **Sales Force Automation** module and the platform core it runs on. POS Sales is in
+> progress: phases 1–4 of 8 (backend, web till, payments, shifts, returns, receipts, daily report) are built; the
+> Windows POS app, offline selling and device licensing are not built yet. See
+> [POS_IMPLEMENTATION_PLAN.md](POS_IMPLEMENTATION_PLAN.md). The rest of CKH ONE (retail, restaurant, hotel, HR,
+> purchasing, full accounting, tax) is not built yet: see [AUDIT_REPORT.md](AUDIT_REPORT.md).
 
 ## Stage 1 — security hardening (2026-10-17)
 - Device sessions with 15-minute access tokens and single-use rotating refresh tokens; replaying an old refresh token signs that device out; logout, device list and remote sign-out; admin sign-out and password reset.
