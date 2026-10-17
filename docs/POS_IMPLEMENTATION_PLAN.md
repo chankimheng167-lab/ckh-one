@@ -124,7 +124,7 @@ the API; menus only hide what the API would refuse anyway.
 | 2 | POS backend: registers, catalogue, checkout transaction, permissions, inventory | ✅ |
 | 3 | Touchscreen POS screen and payment workflow | ✅ |
 | 4 | Receipts, returns/refunds, shifts, reports | ✅ |
-| 5 | Accounting integration and reconciliation | |
+| 5 | Accounting integration and reconciliation | ✅ |
 | 6 | Windows desktop POS and hardware | |
 | 7 | Offline sync and device licensing | |
 | 8 | Security tests, documentation, deployment | |
@@ -203,3 +203,29 @@ the API; menus only hide what the API would refuse anyway.
   - The Khmer and Chinese receipt labels were written by us and need checking by a native speaker before customer use.
   - Refunds to bank, QR or card are recorded with a reference; the money is sent back outside CKH ONE. No payment
     provider is integrated.
+
+### Phase 5 — done
+- Payment verification (`GET /pos/payments/pending`, `POST /pos/payments/:id/verify`, `pos.payments.verify`): someone
+  other than the cashier who took a transfer/QR payment confirms it (Dr the method's bank account, Cr payments pending
+  verification) or rejects it with a reason (Dr cash over and short, Cr pending). A rejected payment leaves
+  `amount_unpaid` on the sale and the sale shows *Balance due*. A payment is verified once only.
+- Balance settlement (`POST /pos/sales/:id/settle`): the customer pays what is owed by any method (cash may give change,
+  other methods may not exceed the balance); Dr the method (or pending again for QR/transfer), Cr cash over and short,
+  with a drawer movement for cash. Idempotent on `clientPaymentId`.
+- Offline-sale review (`POST /pos/sales/:id/review`): a supervisor other than the cashier marks a flagged sale reviewed
+  with a note.
+- Reconciliation (`GET /pos/reconciliation`, `pos.reports.view`) for a date range: each sale posted once and for its
+  payments + discounts + cost; payments + balance due = sale total; each return posted, balanced and equal to its
+  refunds; every verification, rejection and settlement posted; closed drawers add up and every over/short posted;
+  the pending-verification account equals the payments still waiting (shown to users who see all branches). Plus the
+  pending amount, balances due, rejections and sales to review.
+- `/accounting/integrity` gains `POS_DOCUMENTS_POSTED` and `POS_PENDING_CLEARING_MATCHES` (all dates, all branches).
+- A unique index allows one journal entry per POS document (`journal_entries_pos_source_uq`), so nothing can be
+  posted twice, even by a direct database write.
+- Pages: payments to verify, verify/reject sheet, balance payment on the sale page, mark reviewed, reconciliation.
+- 7 end-to-end tests in `apps/api/test/pos-payments.e2e.spec.ts` (including tampering detection); API suite 148/148.
+- Browser run-through: KHQR sale (cashier gets no Verify button), supervisor rejects it from the list, cashier takes
+  the balance in cash with change, manager sees a clean reconciliation. All steps passed.
+- To confirm with the company's accountant: a rejected transfer is booked to *cash over and short* (6900) until the
+  customer pays. A company that prefers a receivable can map that account in POS settings to another account.
+  KHQR/bank statements are checked by a person; there is no bank or Bakong API integration.

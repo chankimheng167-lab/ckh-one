@@ -16,6 +16,8 @@ import { PosShiftsService } from './pos-shifts.service';
 import { PosReceiptsService, PrintInput } from './pos-receipts.service';
 import { DailyQuery, PosReportsService } from './pos-reports.service';
 import { PosReturnsService, ReturnInput, ReturnsQuery } from './pos-returns.service';
+import { PendingQuery, PosPaymentsService, ReviewInput, SettleInput, VerifyInput } from './pos-payments.service';
+import { PosReconciliationService, ReconciliationQuery } from './pos-reconciliation.service';
 
 interface Response { setHeader(name: string, value: string): void; end(body: string | Buffer): void }
 
@@ -544,5 +546,56 @@ export class PosDocumentsController {
     res.setHeader('Content-Disposition', `attachment; filename="pos-daily-${r.from}${r.to !== r.from ? `_${r.to}` : ''}.csv"`);
     res.end(`\ufeff${this.reports.toCsv(r)}`);
     return undefined;
+  }
+}
+
+/** Payment verification, balance settlement, offline review and reconciliation. */
+@RequireModules(MODULES.POS_SALES)
+@Controller('pos')
+export class PosPaymentsController {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly payments: PosPaymentsService,
+    private readonly reconciliation: PosReconciliationService,
+  ) {}
+
+  /** Transfer and QR payments waiting for someone to check the bank or provider. */
+  @Get('payments/pending')
+  @RequirePermissions(P.POS_PAYMENTS_VERIFY)
+  pending(@CurrentUser() user: TenantUser, @Query() query: unknown) {
+    const q = parse(PendingQuery, query);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.payments.pending(tx, user, q));
+  }
+
+  @Post('payments/:id/verify')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_PAYMENTS_VERIFY)
+  verify(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const i = parse(VerifyInput, body);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.payments.verify(tx, user, id, i));
+  }
+
+  /** The customer pays what a rejected payment left owing. */
+  @Post('sales/:id/settle')
+  @RequirePermissions(P.POS_SALES_CREATE)
+  settle(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const i = parse(SettleInput, body);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.payments.settle(tx, user, id, i));
+  }
+
+  /** A supervisor marks an offline sale the server flagged as reviewed. */
+  @Post('sales/:id/review')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_SHIFT_APPROVE)
+  review(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const i = parse(ReviewInput, body);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.payments.review(tx, user, id, i));
+  }
+
+  @Get('reconciliation')
+  @RequirePermissions(P.POS_REPORTS_VIEW)
+  reconcile(@CurrentUser() user: TenantUser, @Query() query: unknown) {
+    const q = parse(ReconciliationQuery, query);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.reconciliation.reconcile(tx, user, q));
   }
 }

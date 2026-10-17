@@ -283,6 +283,8 @@ CREATE TABLE pos_sales (
   amount_tendered       numeric(18,2) NOT NULL DEFAULT 0,
   change_due            numeric(18,2) NOT NULL DEFAULT 0 CHECK (change_due >= 0),
   refunded_total        numeric(18,2) NOT NULL DEFAULT 0 CHECK (refunded_total >= 0),
+  -- Owed by the customer after a transfer/QR payment was rejected; reduced as they settle.
+  amount_unpaid         numeric(18,2) NOT NULL DEFAULT 0 CHECK (amount_unpaid >= 0),
   cost_total            numeric(18,2) NOT NULL DEFAULT 0,
   discount_approved_by  uuid,
   notes                 text,
@@ -291,6 +293,9 @@ CREATE TABLE pos_sales (
   client_created_at     timestamptz,
   review_status         text NOT NULL DEFAULT 'NONE' CHECK (review_status IN ('NONE', 'NEEDS_REVIEW', 'REVIEWED')),
   review_reasons        jsonb,
+  reviewed_by           uuid,
+  reviewed_at           timestamptz,
+  review_notes          text CHECK (review_notes IS NULL OR length(review_notes) <= 500),
   -- One ledger entry per sale: payments, revenue, discounts, VAT, COGS.
   journal_entry_id      uuid,
   created_at            timestamptz NOT NULL DEFAULT now(),
@@ -389,8 +394,17 @@ CREATE TABLE pos_sale_payments (
   account_id             uuid NOT NULL,
   verified_by            uuid,
   verified_at            timestamptz,
-  verification_notes     text,
+  verification_notes     text CHECK (verification_notes IS NULL OR length(verification_notes) <= 500),
+  -- The sale's entry (or, for a settlement, the settlement entry).
   journal_entry_id       uuid,
+  -- The entry that moved the amount out of "pending verification" (confirmed or rejected).
+  verification_journal_id uuid,
+  -- A later payment of a balance left by a rejected transfer/QR.
+  is_settlement          boolean NOT NULL DEFAULT false,
+  -- Retry key for a settlement taken at the till.
+  client_payment_id      text CHECK (client_payment_id IS NULL OR length(client_payment_id) BETWEEN 8 AND 100),
+  received_by            uuid,
+  shift_id               uuid,
   created_at             timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, id),
   CHECK (amount <= amount_tendered),
@@ -398,15 +412,22 @@ CREATE TABLE pos_sale_payments (
   FOREIGN KEY (tenant_id, sale_id) REFERENCES pos_sales (tenant_id, id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id, method_id) REFERENCES pos_payment_methods (tenant_id, id),
   FOREIGN KEY (tenant_id, account_id) REFERENCES chart_of_accounts (tenant_id, id),
-  FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id)
+  FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id),
+  FOREIGN KEY (tenant_id, verification_journal_id) REFERENCES journal_entries (tenant_id, id),
+  CHECK (NOT is_settlement OR received_by IS NOT NULL)
 );
 CREATE INDEX pos_sale_payments_sale_idx ON pos_sale_payments (tenant_id, sale_id);
+CREATE UNIQUE INDEX pos_sale_payments_client_uq ON pos_sale_payments (tenant_id, client_payment_id) WHERE client_payment_id IS NOT NULL;
 CREATE INDEX pos_sale_payments_pending_idx ON pos_sale_payments (tenant_id, status) WHERE status = 'PENDING_VERIFICATION';
 -- The same provider transaction or transfer reference can never pay two sales.
 CREATE UNIQUE INDEX pos_sale_payments_provider_uq ON pos_sale_payments (tenant_id, method_id, provider_transaction_id)
   WHERE provider_transaction_id IS NOT NULL AND status <> 'REJECTED';
 CREATE UNIQUE INDEX pos_sale_payments_reference_uq ON pos_sale_payments (tenant_id, method_id, lower(reference))
   WHERE reference IS NOT NULL AND kind IN ('BANK_TRANSFER', 'QR') AND status <> 'REJECTED';
+
+-- Every POS document (sale, return, shift close, payment verification, settlement) is posted exactly once.
+CREATE UNIQUE INDEX journal_entries_pos_source_uq ON journal_entries (tenant_id, source_type, source_id)
+  WHERE source_type LIKE 'POS\_%';
 
 -- ---------------------------------------------------------------------------
 -- Held (parked) carts

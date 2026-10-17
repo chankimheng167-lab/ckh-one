@@ -473,8 +473,10 @@ export class PosSalesService {
     s.lines = await tx.query('SELECT * FROM pos_sale_lines WHERE sale_id = $1 ORDER BY line_no', [id]);
     s.payments = await tx.query(
       `SELECT p.id, p.method_id, m.code AS method_code, m.name AS method_name, p.kind, p.amount_tendered, p.amount, p.reference,
-              p.provider_transaction_id, p.status, p.verified_at, v.full_name AS verified_by_name, p.verification_notes
+              p.provider_transaction_id, p.status, p.verified_at, v.full_name AS verified_by_name, p.verification_notes,
+              p.is_settlement, p.received_by, rb.full_name AS received_by_name, p.created_at
          FROM pos_sale_payments p JOIN pos_payment_methods m ON m.id = p.method_id LEFT JOIN users v ON v.id = p.verified_by
+         LEFT JOIN users rb ON rb.id = p.received_by
         WHERE p.sale_id = $1 ORDER BY p.line_no`,
       [id],
     );

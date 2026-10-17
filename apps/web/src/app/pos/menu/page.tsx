@@ -20,6 +20,8 @@ const ITEMS: { href: string; label: string; hint: string; perm?: string; any?: s
   { href: '/pos/returns/', label: 'Returns and refunds', hint: 'Take items back and refund', perm: P.POS_REFUNDS_CREATE },
   { href: '/pos/shifts/', label: 'Cashier shifts', hint: 'Open, count and close the drawer' },
   { href: '/pos/cash/', label: 'Cash movements', hint: 'Cash in and out of the drawer' },
+  { href: '/pos/payments/', label: 'Payments to verify', hint: 'Confirm or reject transfers and KHQR', perm: P.POS_PAYMENTS_VERIFY },
+  { href: '/pos/reconciliation/', label: 'Reconciliation', hint: 'Books against tills, pending payments', perm: P.POS_REPORTS_VIEW },
   { href: '/pos/reports/', label: 'Daily sales report', hint: 'Totals by register, cashier, method, tax', perm: P.POS_REPORTS_VIEW },
   { href: '/pos/registers/', label: 'Registers', hint: 'Checkout counters, staff branches, licence use', any: [P.POS_REGISTERS_MANAGE, P.POS_REPORTS_VIEW] },
   { href: '/pos/receipt-settings/', label: 'Receipt settings', hint: 'Header, footer, languages, paper', perm: P.POS_SETTINGS_MANAGE },

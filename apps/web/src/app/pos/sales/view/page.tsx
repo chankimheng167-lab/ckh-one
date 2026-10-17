@@ -1,9 +1,12 @@
 'use client';
+import { useState } from 'react';
 import { P } from '@ckh/shared';
-import { PosShell, usePos } from '@/components/PosShell';
-import { Card, ErrorBox, Loading, Page, Status } from '@/components/ui';
+import { SettleSheet, VerifyPaymentSheet } from '@/components/PosPayments';
+import { PosShell, Sheet, usePos } from '@/components/PosShell';
+import { Card, ErrorBox, Field, Loading, Page, Status } from '@/components/ui';
+import { api } from '@/lib/api';
 import { dateTime, human, money, num } from '@/lib/format';
-import { useApi, useQueryParam } from '@/lib/hooks';
+import { useAction, useApi, useQueryParam } from '@/lib/hooks';
 
 export default function SaleDetailsPage() {
   return (
@@ -15,8 +18,11 @@ export default function SaleDetailsPage() {
 
 function SaleDetails() {
   const id = useQueryParam('id');
-  const { can } = usePos();
-  const { data: s, error, loading } = useApi(id ? `/pos/sales/${id}` : null);
+  const { ctx, can } = usePos();
+  const { data: s, error, loading, reload } = useApi(id ? `/pos/sales/${id}` : null);
+  const [verify, setVerify] = useState<any>(null);
+  const [settle, setSettle] = useState(false);
+  const [review, setReview] = useState(false);
   if (error) return <ErrorBox error={error} />;
   if (loading || !s) return <Loading />;
   const cur = s.currency;
@@ -39,7 +45,19 @@ function SaleDetails() {
         {s.review_status === 'NEEDS_REVIEW' && <span className="badge warn">Needs review</span>}
       </div>
       {s.review_reasons?.length > 0 && (
-        <div className="notice warn small">{s.review_reasons.map((r: any) => r.message).join(' · ')}</div>
+        <div className="notice warn small">
+          {s.review_reasons.map((r: any) => r.message ?? human(r.code)).join(' · ')}
+          {s.review_status === 'NEEDS_REVIEW' && can(P.POS_SHIFT_APPROVE) && ctx.user.id !== s.cashier_id && (
+            <button className="small" style={{ marginLeft: 8 }} onClick={() => setReview(true)}>Mark reviewed</button>
+          )}
+          {s.review_notes && <div>Reviewed: {s.review_notes}</div>}
+        </div>
+      )}
+      {Number(s.amount_unpaid) > 0 && (
+        <div className="notice bad row">
+          <span>The customer still owes <b>{money(s.amount_unpaid, cur)}</b>: a payment was rejected.</span>
+          {can(P.POS_SALES_CREATE) && <button className="primary" onClick={() => setSettle(true)}>Take payment</button>}
+        </div>
       )}
       <div className="grid-2">
         <Card title="Customer">
@@ -91,7 +109,17 @@ function SaleDetails() {
               <tr key={p.id}>
                 <td>{p.method_name}{p.reference && <div className="small muted">Ref {p.reference}</div>}</td>
                 <td className="num">{money(p.amount, cur)}{p.amount_tendered !== p.amount && <div className="small muted">tendered {money(p.amount_tendered, cur)}</div>}</td>
-                <td><Status s={p.status} />{p.verified_by_name && <div className="small muted">by {p.verified_by_name} {dateTime(p.verified_at)}</div>}</td>
+                <td>
+                  <Status s={p.status} />
+                  {p.is_settlement && <span className="small muted"> balance payment</span>}
+                  {p.verified_by_name && <div className="small muted">by {p.verified_by_name} {dateTime(p.verified_at)}{p.verification_notes ? ` · ${p.verification_notes}` : ''}</div>}
+                  {p.provider_transaction_id && <div className="small muted">Txn {p.provider_transaction_id}</div>}
+                </td>
+                <td>
+                  {p.status === 'PENDING_VERIFICATION' && can(P.POS_PAYMENTS_VERIFY) && ctx.user.id !== (p.is_settlement ? p.received_by : s.cashier_id) && (
+                    <button onClick={() => setVerify(p)}>Verify</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -117,6 +145,21 @@ function SaleDetails() {
           </ul>
         </Card>
       )}
+      {verify && <VerifyPaymentSheet payment={{ ...verify, sale_number: s.number }} currency={cur} onClose={() => setVerify(null)} onDone={() => { setVerify(null); reload(); }} />}
+      {settle && <SettleSheet sale={s} onClose={() => setSettle(false)} onDone={() => { setSettle(false); reload(); }} />}
+      {review && <ReviewSheet saleId={s.id} onClose={() => setReview(false)} onDone={() => { setReview(false); reload(); }} />}
     </Page>
+  );
+}
+
+function ReviewSheet({ saleId, onDone, onClose }: { saleId: string; onDone: () => void; onClose: () => void }) {
+  const [notes, setNotes] = useState('');
+  const act = useAction();
+  return (
+    <Sheet title="Mark sale reviewed" onClose={onClose}>
+      <Field label="What you checked"><input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Price list changed while offline; accepted" /></Field>
+      <ErrorBox error={act.error} />
+      <button className="primary" style={{ marginTop: 8 }} disabled={act.busy || !notes.trim()} onClick={async () => { if (await act.run(() => api.post(`/pos/sales/${saleId}/review`, { notes }))) onDone(); }}>Mark reviewed</button>
+    </Sheet>
   );
 }

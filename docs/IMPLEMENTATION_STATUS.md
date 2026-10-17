@@ -3,7 +3,7 @@
 _Last updated: 2026-10-17 · all 5 SFA phases built · platform security hardening (stage 1) done_
 
 > This file covers the **Sales Force Automation** module and the platform core it runs on. POS Sales is in
-> progress: phases 1–4 of 8 (backend, web till, payments, shifts, returns, receipts, daily report) are built; the
+> progress: phases 1–5 of 8 (backend, web till, payments and their verification, shifts, returns, receipts, daily report, reconciliation) are built; the
 > Windows POS app, offline selling and device licensing are not built yet. See
 > [POS_IMPLEMENTATION_PLAN.md](POS_IMPLEMENTATION_PLAN.md). The rest of CKH ONE (retail, restaurant, hotel, HR,
 > purchasing, full accounting, tax) is not built yet: see [AUDIT_REPORT.md](AUDIT_REPORT.md).
