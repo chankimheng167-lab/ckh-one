@@ -7,6 +7,8 @@ export const MODULES = {
   // Platform core (always on for an active subscription)
   CORE: 'CORE',
   POS: 'POS',
+  /** POS Sales & Cashier Management (web and Windows POS). */
+  POS_SALES: 'POS_SALES',
   INVENTORY: 'INVENTORY',
   ACCOUNTING: 'ACCOUNTING',
   CRM: 'CRM',
@@ -25,6 +27,7 @@ export type ModuleCode = (typeof MODULES)[keyof typeof MODULES];
 export const MODULE_CATALOG: { code: ModuleCode; name: string; requires: ModuleCode[] }[] = [
   { code: 'CORE', name: 'Core Platform', requires: [] },
   { code: 'POS', name: 'Point of Sale', requires: ['CORE', 'INVENTORY'] },
+  { code: 'POS_SALES', name: 'POS Sales & Cashier', requires: ['CORE', 'INVENTORY'] },
   { code: 'INVENTORY', name: 'Inventory', requires: ['CORE'] },
   { code: 'ACCOUNTING', name: 'Accounting', requires: ['CORE'] },
   { code: 'CRM', name: 'CRM', requires: ['CORE'] },

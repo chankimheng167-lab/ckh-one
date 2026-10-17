@@ -52,12 +52,12 @@ CREATE POLICY admin_locations_write ON admin_locations FOR ALL
   WITH CHECK (tenant_id = current_tenant_id() OR is_platform_admin());
 GRANT SELECT, INSERT, UPDATE, DELETE ON admin_locations TO ckh_app;
 
--- Subscription state: tenants may read their own, only the platform writes.
+-- Subscription and POS licence state: tenants may read their own, only the platform writes.
 DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['tenant_modules', 'tenant_subscriptions'] LOOP
+  FOREACH t IN ARRAY ARRAY['tenant_modules', 'tenant_subscriptions', 'pos_licenses'] LOOP
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
     EXECUTE format('DROP POLICY IF EXISTS tenant_read ON %I', t);
     EXECUTE format('DROP POLICY IF EXISTS platform_write ON %I', t);

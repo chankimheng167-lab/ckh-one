@@ -5,3 +5,4 @@ export * from './pricing';
 export * from './approval-policy';
 export * from './commission';
 export * from './theme';
+export * from './pos';

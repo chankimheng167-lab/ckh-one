@@ -21,6 +21,9 @@ const ROLE_APPROVAL_LEVEL: Record<string, number> = {
   TENANT_ADMIN: APPROVAL_LEVEL.DIRECTOR,
   SALES_MANAGER: APPROVAL_LEVEL.MANAGER,
   SALES_SUPERVISOR: APPROVAL_LEVEL.SUPERVISOR,
+  POS_SUPERVISOR: APPROVAL_LEVEL.SUPERVISOR,
+  POS_MANAGER: APPROVAL_LEVEL.MANAGER,
+  BRANCH_ADMIN: APPROVAL_LEVEL.MANAGER,
 };
 
 /** Validates that every module's prerequisites are also enabled. */
@@ -106,6 +109,8 @@ export class TenantProvisioningService {
     await tx.query(`INSERT INTO warehouses (tenant_id, branch_id, code, name) VALUES ($1, $2, 'MAIN', 'Main Warehouse')`, [tenantId, branchId]);
 
     await this.seedChartOfAccounts(tx, tenantId);
+    // POS defaults (accounts, settings, payment methods, licence row, numbering); see migration 0009.
+    await tx.query('SELECT pos_provision_tenant($1)', [tenantId]);
 
     // Subscription
     const plan = input.subscription.planCode
