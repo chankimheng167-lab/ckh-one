@@ -1,6 +1,7 @@
 /** Thin client for the CKH ONE API. Every price and total shown after a save comes from the server. */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '');
 const TOKEN_KEY = 'ckh.token';
+const PLATFORM_TOKEN_KEY = 'ckh.platformToken';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) {
@@ -12,10 +13,13 @@ export class ApiError extends Error {
   }
 }
 
-export const tokenStore = {
-  get: () => (typeof window === 'undefined' ? null : safe(() => localStorage.getItem(TOKEN_KEY))),
-  set: (t: string | null) => safe(() => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY))),
-};
+const storeFor = (key: string) => ({
+  get: () => (typeof window === 'undefined' ? null : safe(() => localStorage.getItem(key))),
+  set: (t: string | null) => safe(() => (t ? localStorage.setItem(key, t) : localStorage.removeItem(key))),
+});
+export const tokenStore = storeFor(TOKEN_KEY);
+/** Super Admin token, kept apart from the company user's so both can be signed in at once. */
+export const platformTokenStore = storeFor(PLATFORM_TOKEN_KEY);
 function safe<T>(fn: () => T): T | null {
   try {
     return fn();
@@ -24,9 +28,9 @@ function safe<T>(fn: () => T): T | null {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, store = tokenStore, loginPath = '/login/'): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
-  const token = tokenStore.get();
+  const token = store.get();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
@@ -36,8 +40,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(0, 'NETWORK', 'You appear to be offline');
   }
   if (res.status === 401) {
-    tokenStore.set(null);
-    if (typeof window !== 'undefined' && !location.pathname.startsWith('/login')) location.href = '/login/';
+    store.set(null);
+    if (typeof window !== 'undefined' && !location.pathname.startsWith(loginPath.replace(/\/$/, ''))) location.href = loginPath;
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
@@ -62,6 +66,13 @@ export const api = {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
+};
+
+/** Super Admin (platform owner) calls; a rejected token sends the browser back to the /platform/ sign-in. */
+export const platformApi = {
+  get: <T = any>(p: string) => request<T>('GET', p, undefined, platformTokenStore, '/platform/'),
+  post: <T = any>(p: string, b: unknown = {}) => request<T>('POST', p, b, platformTokenStore, '/platform/'),
+  put: <T = any>(p: string, b: unknown = {}) => request<T>('PUT', p, b, platformTokenStore, '/platform/'),
 };
 
 export const qs = (o: Record<string, string | number | boolean | undefined | null>) => {
