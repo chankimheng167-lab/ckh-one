@@ -106,4 +106,47 @@ export class AccountingController {
       ),
     );
   }
+
+  /**
+   * Ledger consistency checks: every posted entry balances, the trial balance
+   * nets to zero, and the receivables control account equals the customer
+   * sub-ledger (open invoices − unapplied credit notes − unallocated receipts).
+   * Offline-synced documents post through the same services, so this also
+   * verifies that replayed offline activity left the books consistent.
+   */
+  @Get('integrity')
+  @RequirePermissions(P.SALES_INVOICES_CREATE)
+  integrity(@CurrentUser() user: TenantUser) {
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const unbalanced = await tx.query<{ id: string; number: string; debit: string; credit: string }>(
+        `SELECT e.id, e.number, SUM(l.debit) AS debit, SUM(l.credit) AS credit
+           FROM journal_entries e JOIN journal_lines l ON l.journal_entry_id = e.id
+          WHERE e.status = 'POSTED' GROUP BY e.id HAVING SUM(l.debit) <> SUM(l.credit)`,
+      );
+      const tb = await tx.one<{ debit: string; credit: string }>(
+        `SELECT COALESCE(SUM(l.debit), 0) AS debit, COALESCE(SUM(l.credit), 0) AS credit
+           FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'`,
+      );
+      const ar = await tx.one<{ control: string; subledger: string }>(
+        `SELECT
+           (SELECT COALESCE(SUM(l.debit - l.credit), 0) FROM journal_lines l
+              JOIN journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+              JOIN accounting_settings s ON s.ar_account_id = l.account_id) AS control,
+           (SELECT COALESCE(SUM(outstanding), 0) FROM customer_balances) AS subledger`,
+      );
+      const stock = await tx.one<{ n: string }>(`SELECT count(*) AS n FROM stock_levels s JOIN warehouses w ON w.id = s.warehouse_id
+          WHERE s.qty_on_hand < 0 OR (w.centrally_controlled AND s.qty_reserved > s.qty_on_hand)`);
+      const sync = await tx.one<{ stuck: string; refused: string }>(`SELECT count(*) FILTER (WHERE status = 'RECEIVED') AS stuck, count(*) FILTER (WHERE status IN ('REJECTED', 'CONFLICT')) AS refused
+           FROM sales_offline_sync_events`);
+      const checks = [
+        { code: 'JOURNALS_BALANCED', ok: unbalanced.length === 0, details: unbalanced },
+        { code: 'TRIAL_BALANCE_ZERO', ok: Number(tb.debit) === Number(tb.credit), details: tb },
+        { code: 'AR_CONTROL_MATCHES_SUBLEDGER', ok: Number(ar.control) === Number(ar.subledger), details: ar },
+        { code: 'STOCK_NOT_OVERSOLD', ok: Number(stock.n) === 0, details: { rows: Number(stock.n) } },
+        // An event left RECEIVED was never settled; REJECTED / CONFLICT events were refused cleanly and changed nothing.
+        { code: 'OFFLINE_EVENTS_SETTLED', ok: Number(sync.stuck) === 0, details: { unsettled: Number(sync.stuck), refused: Number(sync.refused) } },
+      ];
+      return { ok: checks.every((c) => c.ok), checkedAt: new Date().toISOString(), checks };
+    });
+  }
 }

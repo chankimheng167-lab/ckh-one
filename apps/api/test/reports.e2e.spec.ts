@@ -1,11 +1,11 @@
 import type { INestApplication } from '@nestjs/common';
 import ExcelJS from 'exceljs';
-import { Api, bootApp, Company, createCompany } from './helpers';
+import { Api, bootApp, Company, createCompany, localToday } from './helpers';
 
 let app: INestApplication;
 let co: Company;
 let api: Api;
-const today = new Date().toISOString().slice(0, 10);
+const today = localToday();
 
 const rep = () => api.as(co.tokens.rep);
 const sup = () => api.as(co.tokens.supervisor);

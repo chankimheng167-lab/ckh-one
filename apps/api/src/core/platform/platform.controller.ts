@@ -3,8 +3,9 @@ import { MODULE_CATALOG, MODULES, ModuleCode } from '@ckh/shared';
 import { z } from 'zod';
 import { CurrentAdmin, PlatformAdmin, PlatformOnly } from '../../common/auth-context';
 import { AuditService } from '../../common/audit.service';
-import { notFound } from '../../common/errors';
-import { parse } from '../../common/validation';
+import { DomainError, notFound } from '../../common/errors';
+import { isValidTimeZone } from '../../common/business-time';
+import { newPassword, parse } from '../../common/validation';
 import { DatabaseService } from '../../db/database.service';
 import { TenantProvisioningService, validateModuleSet } from './tenant-provisioning.service';
 
@@ -14,7 +15,9 @@ const CreateTenant = z.object({
   code: z.string().regex(/^[a-z0-9][a-z0-9-]{1,40}$/),
   name: z.string().min(2).max(200),
   baseCurrency: z.string().length(3).default('USD'),
-  admin: z.object({ email: z.string().email(), password: z.string().min(10).max(200), fullName: z.string().min(1).max(200) }),
+  countryCode: z.string().length(2).default('KH'),
+  timezone: z.string().min(1).max(64).optional(),
+  admin: z.object({ email: z.string().email(), password: newPassword, fullName: z.string().min(1).max(200) }),
   modules: z.array(moduleCode).default([]),
   subscription: z.object({
     status: z.enum(['TRIAL', 'ACTIVE']),
@@ -55,7 +58,7 @@ export class PlatformController {
   tenants() {
     return this.db.withPlatform(null, (tx) =>
       tx.query(
-        `SELECT t.id, t.code, t.name, t.status, t.created_at,
+        `SELECT t.id, t.code, t.name, t.status, t.timezone, t.country_code, t.created_at,
                 s.status AS subscription_status, s.ends_at,
                 (SELECT array_agg(module_code ORDER BY module_code) FROM tenant_modules m WHERE m.tenant_id = t.id AND m.enabled) AS modules
            FROM tenants t
@@ -86,6 +89,9 @@ export class PlatformController {
   @Put('tenants/:tenantId/modules')
   setModules(@Param('tenantId', ParseUUIDPipe) tenantId: string, @Body() body: unknown, @CurrentAdmin() admin: PlatformAdmin) {
     const input = parse(SetModules, body);
+    if (input.modules.some((m) => m.code === MODULES.CORE && (!m.enabled || m.endsAt))) {
+      throw new DomainError('CORE_REQUIRED', 'The Core Platform module cannot be switched off; suspend the company instead', 422);
+    }
     return this.db.withPlatform(admin.adminId, async (tx) => {
       const exists = await tx.maybeOne('SELECT 1 FROM tenants WHERE id = $1', [tenantId]);
       if (!exists) throw notFound('Tenant');
@@ -153,6 +159,24 @@ export class PlatformController {
       const r = await tx.maybeOne('UPDATE tenants SET status = $2 WHERE id = $1 RETURNING id, status', [tenantId, status]);
       if (!r) throw notFound('Tenant');
       await this.audit.record(tx, { actorType: 'PLATFORM_ADMIN', tenantId, action: 'TENANT_STATUS_CHANGED', entityType: 'tenant', entityId: tenantId, after: { status } });
+      return r;
+    });
+  }
+
+  /** Company settings the platform owns: business time zone and country. */
+  @Put('tenants/:tenantId/settings')
+  setSettings(@Param('tenantId', ParseUUIDPipe) tenantId: string, @Body() body: unknown, @CurrentAdmin() admin: PlatformAdmin) {
+    const input = parse(z.object({ timezone: z.string().min(1).max(64).optional(), countryCode: z.string().length(2).optional() }), body);
+    if (input.timezone && !isValidTimeZone(input.timezone)) throw new DomainError('INVALID_TIMEZONE', `Unknown time zone ${input.timezone}`, 422);
+    return this.db.withPlatform(admin.adminId, async (tx) => {
+      const r = await tx.maybeOne(
+        `UPDATE tenants SET timezone = COALESCE($2, timezone), country_code = COALESCE($3, country_code)
+          WHERE id = $1 RETURNING id, timezone, country_code`,
+        [tenantId, input.timezone ?? null, input.countryCode?.toUpperCase() ?? null],
+      );
+      if (!r) throw notFound('Tenant');
+      this.db.forgetTimezone(tenantId);
+      await this.audit.record(tx, { actorType: 'PLATFORM_ADMIN', tenantId, action: 'TENANT_SETTINGS_CHANGED', entityType: 'tenant', entityId: tenantId, after: input });
       return r;
     });
   }

@@ -1,6 +1,20 @@
 # CKH ONE Sales Force Automation — Implementation Status
 
-_Last updated: 2026-10-17 · all 5 phases built_
+_Last updated: 2026-10-17 · all 5 SFA phases built · platform security hardening (stage 1) done_
+
+> This file covers the **Sales Force Automation** module and the platform core it runs on. The rest of
+> CKH ONE (POS, Windows POS, retail, restaurant, hotel, HR, purchasing, full accounting, tax) is not built
+> yet: see [AUDIT_REPORT.md](AUDIT_REPORT.md) for the full comparison and roadmap.
+
+## Stage 1 — security hardening (2026-10-17)
+- Device sessions with 15-minute access tokens and single-use rotating refresh tokens; replaying an old refresh token signs that device out; logout, device list and remote sign-out; admin sign-out and password reset.
+- Account lockout after repeated failed sign-ins.
+- Business dates in the company's time zone (`Asia/Phnom_Penh` by default), not UTC.
+- Module licensing fails closed: a route that names no module still needs `CORE`, which cannot be switched off.
+- Super Admin accounts hidden from tenant sessions by row-level security; catalogue test proves every tenant table has forced RLS.
+- `GET /accounting/integrity`: balanced journals, zero trial balance, AR control = sub-ledger, no oversell, offline events settled.
+- Production refuses the public demo password, requires `CORS_ORIGINS`, and sends security headers.
+- Tests: **98 / 98** API end-to-end (new `security.e2e.spec.ts` with 22 tests, plus integrity checks after billing and offline replay), browser smoke test all good.
 
 The repository was empty when work began, so Phase 1 also built the platform
 foundation the SFA spec expects to reuse (tenancy, auth, roles, subscriptions,
@@ -92,11 +106,11 @@ The spec's required end-to-end scenarios and where they are tested:
 ## Known issues and decisions to review
 
 1. **CI on GitHub.** The code is on GitHub (`chankimheng167-lab/ckh-one`); `.github/workflows/ci.yml` runs the same checks on every push.
-2. **Dates use UTC.** "Today", default report ranges and visit dates are computed in UTC. Cambodia is UTC+7, so activity between 00:00 and 07:00 local time lands on the previous day. Fix: store a tenant time zone and compute business dates with it.
+2. ~~**Dates use UTC.**~~ Fixed in stage 1: business dates use the company's time zone.
 3. **Order line ids change on submit.** Submit re-prices and re-inserts the lines; anything referencing a line (e.g. a return) must read the order after submit. Harmless today, but a future API should keep line ids stable.
 4. **Offline catalogue size.** The snapshot carries up to 5,000 products and is a full download each time; large catalogues need paging and delta sync (`since` is accepted but not used yet).
 5. **Offline orders from a stale catalogue are accepted** (and flagged). If the company prefers to block them, that is a one-line policy change in `SyncService`.
-6. **Sign-in token lives in browser storage.** Fine for a PWA that must work offline, but it is readable by any injected script; keep a strict Content-Security-Policy and consider short-lived tokens with refresh. There is no refresh-token rotation or device revocation yet.
+6. **Refresh token lives in browser storage** so the PWA can reopen offline. Since stage 1 the access token is in memory only and expires in 15 minutes, the refresh token is single-use and rotated, replay signs the device out, a CSP is set, and sessions can be revoked.
 7. **Admin screens for teams, territories and commission plans are API-only.** The web app covers the 18 required screens; creating territories, assigning reps and editing commission plans is done through the API (or a later admin screen). Quotations and return requests also have full APIs but no dedicated screens.
 8. **HR & Payroll is a hand-off only.** Commission batches are sent to `hr/payroll/commission-batches` and marked paid there; there is no payroll engine yet.
 9. **Notifications are not sent.** Approvers, reps and accountants see their work in the app, but no push, SMS or email notifications exist yet.

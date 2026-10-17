@@ -72,5 +72,11 @@ REVOKE UPDATE, DELETE ON audit_log FROM ckh_app;
 -- Platform reference tables.
 GRANT SELECT ON platform_modules, subscription_plans TO ckh_app;
 GRANT SELECT, INSERT, UPDATE ON platform_admins TO ckh_app;
+
+-- Super Admin accounts (password hashes) are invisible to tenant sessions.
+ALTER TABLE platform_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform_admins FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS platform_only ON platform_admins;
+CREATE POLICY platform_only ON platform_admins USING (is_platform_admin()) WITH CHECK (is_platform_admin());
 GRANT SELECT ON customer_balances TO ckh_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO ckh_app;

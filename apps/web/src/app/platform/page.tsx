@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, Empty, ErrorBox, Field, Loading, Page, Status } from '@/components/ui';
-import { ApiError, platformApi, platformTokenStore } from '@/lib/api';
+import { ApiError, deviceInfo, type IssuedTokens, platformApi, platformTokenStore } from '@/lib/api';
 import { date, human } from '@/lib/format';
 import { useAction } from '@/lib/hooks';
 
@@ -80,8 +80,8 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await platformApi.post<{ accessToken: string }>('/auth/platform/login', { email: email.trim(), password });
-      platformTokenStore.set(r.accessToken);
+      const r = await platformApi.post<IssuedTokens>('/auth/platform/login', { email: email.trim(), password, ...deviceInfo() });
+      platformTokenStore.set(r);
       onSignedIn();
     } catch (err) {
       setError(err instanceof ApiError && err.isNetwork ? 'Cannot reach the server. Is the API running?' : 'Email or password is incorrect.');
@@ -296,8 +296,9 @@ function Portal({ onSignOut }: { onSignOut: () => void }) {
 
 export default function PlatformPage() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
-  useEffect(() => setSignedIn(!!platformTokenStore.get()), []);
+  useEffect(() => setSignedIn(platformTokenStore.hasSession()), []);
   const signOut = useCallback(() => {
+    void platformApi.post('/auth/logout').catch(() => undefined);
     platformTokenStore.set(null);
     setSignedIn(false);
   }, []);

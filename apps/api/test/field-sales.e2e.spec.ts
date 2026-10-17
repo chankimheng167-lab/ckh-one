@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { Client } from 'pg';
-import { ALL_SALES_MODULES, Api, bootApp, Company, createCompany, ownerUrl } from './helpers';
+import { ALL_SALES_MODULES, Api, bootApp, Company, createCompany, ownerUrl, localToday } from './helpers';
 
 let app: INestApplication;
 let co: Company;
@@ -21,7 +21,7 @@ const admin = () => api.as(co.tokens.admin);
 const wh = () => api.as(co.tokens.warehouse);
 const acct = () => api.as(co.tokens.accountant);
 const line = (productId: string, quantity: string, discountPercent = '0') => ({ productId, quantity, discountPercent });
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localToday();
 const thisMonth = () => `${today().slice(0, 7)}-01`;
 
 async function sql<T = any>(text: string, params: unknown[] = []): Promise<T[]> {

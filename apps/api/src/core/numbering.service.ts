@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { businessYear } from '../common/business-time';
 import type { Tx } from '../db/database.service';
 
 /**
@@ -24,7 +25,7 @@ export class NumberingService {
       );
       return this.next(tx, docType, at);
     }
-    const prefix = row.prefix.replace('{YYYY}', String(at.getUTCFullYear()));
+    const prefix = row.prefix.replace('{YYYY}', String(businessYear(tx.timezone, at)));
     return prefix + String(row.next_value).padStart(row.padding, '0');
   }
 }

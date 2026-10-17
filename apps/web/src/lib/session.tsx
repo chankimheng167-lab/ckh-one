@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { themeCssVariables } from '@ckh/shared';
-import { api, ApiError, tokenStore } from './api';
+import { api, ApiError, deviceInfo, type IssuedTokens, tokenStore } from './api';
 import { flushOutbox, isStale, loadSnapshot, outboxCounts, refreshSnapshot } from './sync';
 import type { Snapshot } from './db';
 
@@ -13,6 +13,8 @@ export interface Me {
   permissions: string[];
   approvalLevel: number | null;
   modules: string[];
+  /** Company business time zone, e.g. Asia/Phnom_Penh. */
+  timezone?: string;
 }
 
 interface Session {
@@ -87,8 +89,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setOnline(navigator.onLine);
     const cachedTheme = read<Record<string, string>>(THEME_KEY);
     setCssVars(cachedTheme ?? themeCssVariables({}));
-    const token = tokenStore.get();
-    if (!token) {
+    if (!tokenStore.hasSession()) {
       setLoading(false);
       return;
     }
@@ -144,8 +145,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       can: (p) => !!me?.permissions.includes(p),
       hasModule: (m) => !!me?.modules.includes(m),
       async login(tenantCode, email, password) {
-        const r = await api.post('/auth/login', { tenantCode, email, password });
-        tokenStore.set(r.accessToken);
+        const r = await api.post<IssuedTokens>('/auth/login', { tenantCode, email, password, ...deviceInfo() });
+        tokenStore.set(r);
         const m = await api.get<Me>('/auth/me');
         write(ME_KEY, m);
         setMe(m);
@@ -154,6 +155,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (m.modules.includes('SALES_OFFLINE_ORDERING')) setSnapshot(await refreshSnapshot(m.userId).catch(() => null));
       },
       logout() {
+        // End the session on the server too, so the refresh token is dead even if it was copied.
+        void api.post('/auth/logout').catch(() => undefined);
         tokenStore.set(null);
         write(ME_KEY, null);
         setMe(null);

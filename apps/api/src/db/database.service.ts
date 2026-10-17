@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Pool, PoolClient, QueryResultRow, types } from 'pg';
+import { businessDate, DEFAULT_TIMEZONE } from '../common/business-time';
 import { loadConfig } from '../config';
 
 /** A client bound to one transaction with tenant context already set. */
@@ -9,6 +10,10 @@ export interface Tx {
   maybeOne<R extends QueryResultRow = any>(sql: string, params?: unknown[]): Promise<R | null>;
   readonly tenantId: string | null;
   readonly userId: string | null;
+  /** The tenant's business time zone (the transaction's TimeZone is set to it). */
+  readonly timezone: string;
+  /** Today's business date in the tenant's time zone, 'YYYY-MM-DD'. */
+  today(): string;
 }
 
 export class NotFoundRowError extends Error {}
@@ -17,10 +22,12 @@ export class NotFoundRowError extends Error {}
 // shift them by the server's time zone.
 types.setTypeParser(1082, (v: string) => v);
 
-function wrap(client: PoolClient, tenantId: string | null, userId: string | null): Tx {
+function wrap(client: PoolClient, tenantId: string | null, userId: string | null, timezone = DEFAULT_TIMEZONE): Tx {
   return {
     tenantId,
     userId,
+    timezone,
+    today: () => businessDate(timezone),
     async query(sql, params) {
       const r = await client.query(sql, params as any[]);
       return r.rows;
@@ -59,13 +66,29 @@ export class DatabaseService implements OnModuleDestroy {
     await this.pool.end();
   }
 
+  /**
+   * Tenant time zones, cached briefly: the transaction's TimeZone is set to
+   * the tenant's zone so CURRENT_DATE and timestamptz::date are business dates.
+   */
+  private readonly zones = new Map<string, { tz: string; at: number }>();
+
+  forgetTimezone(tenantId: string) {
+    this.zones.delete(tenantId);
+  }
+
   async withTenant<T>(tenantId: string, userId: string | null, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return this.run(async (client) => {
+      const cached = this.zones.get(tenantId);
+      const fresh = cached && Date.now() - cached.at < 60_000 ? cached.tz : null;
       await client.query(
         "SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true), set_config('app.platform_admin', '', true)",
         [tenantId, userId ?? ''],
       );
-      return fn(wrap(client, tenantId, userId));
+      const tz =
+        fresh ?? (await client.query<{ timezone: string }>('SELECT timezone FROM tenants WHERE id = $1', [tenantId])).rows[0]?.timezone ?? DEFAULT_TIMEZONE;
+      if (!fresh) this.zones.set(tenantId, { tz, at: Date.now() });
+      await client.query("SELECT set_config('TimeZone', $1, true)", [tz]);
+      return fn(wrap(client, tenantId, userId, tz));
     });
   }
 

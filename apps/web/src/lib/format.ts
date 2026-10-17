@@ -18,5 +18,20 @@ export const ago = (v: string) => {
   return `${Math.round(s / 86400)} days ago`;
 };
 export const human = (code: string | null | undefined) => (code ? code.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : '');
-export const today = () => new Date().toISOString().slice(0, 10);
+/** The company's business time zone (from the signed-in user's profile); Cambodia by default. */
+function companyTimeZone(): string {
+  try {
+    return JSON.parse(localStorage.getItem('ckh.me') ?? 'null')?.timezone ?? 'Asia/Phnom_Penh';
+  } catch {
+    return 'Asia/Phnom_Penh';
+  }
+}
+/** Today's business date in the company's time zone (not UTC), 'YYYY-MM-DD'. */
+export const today = () => {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: companyTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+};
 export const monthStart = () => `${today().slice(0, 7)}-01`;

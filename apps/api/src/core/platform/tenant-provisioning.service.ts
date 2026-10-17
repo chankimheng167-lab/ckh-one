@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { DEFAULT_ROLES, MODULE_CATALOG, ModuleCode, APPROVAL_LEVEL } from '@ckh/shared';
+import { defaultTimeZoneFor, isValidTimeZone } from '../../common/business-time';
 import { DomainError } from '../../common/errors';
 import type { Tx } from '../../db/database.service';
 
@@ -8,6 +9,9 @@ export interface NewTenantInput {
   code: string;
   name: string;
   baseCurrency?: string;
+  countryCode?: string;
+  /** IANA zone for business dates; defaults from the country (Asia/Phnom_Penh for KH). */
+  timezone?: string;
   admin: { email: string; password: string; fullName: string };
   modules: ModuleCode[];
   subscription: { status: 'TRIAL' | 'ACTIVE'; endsAt: string | null; graceDays?: number; planCode?: string };
@@ -43,10 +47,13 @@ export class TenantProvisioningService {
     const modules = Array.from(new Set<ModuleCode>(['CORE', ...input.modules]));
     validateModuleSet(modules);
     const currency = input.baseCurrency ?? 'USD';
+    const country = (input.countryCode ?? 'KH').toUpperCase();
+    const timezone = input.timezone ?? defaultTimeZoneFor(country);
+    if (!isValidTimeZone(timezone)) throw new DomainError('INVALID_TIMEZONE', `Unknown time zone ${timezone}`, 422);
 
     const { id: tenantId } = await tx.one<{ id: string }>(
-      'INSERT INTO tenants (code, name, base_currency) VALUES ($1, $2, $3) RETURNING id',
-      [input.code.toLowerCase(), input.name, currency],
+      'INSERT INTO tenants (code, name, base_currency, country_code, timezone) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [input.code.toLowerCase(), input.name, currency, country, timezone],
     );
 
     // Roles and permissions

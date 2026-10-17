@@ -1,7 +1,8 @@
 import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
+import { MODULES } from '@ckh/shared';
 import {
+  ACCOUNT_ROUTE,
   IS_PUBLIC,
   PLATFORM_ONLY,
   Principal,
@@ -11,20 +12,20 @@ import {
 import { DomainError } from '../../common/errors';
 import { DatabaseService } from '../../db/database.service';
 import { SubscriptionService } from '../subscriptions/subscription.service';
+import { JwtPayload, SessionService } from './session.service';
 
-export interface JwtPayload {
-  sub: string;
-  typ: 'user' | 'platform';
-  tid?: string;
-}
+export type { JwtPayload } from './session.service';
 
 /**
  * Single global guard, run on every route, in this order:
- *   1. authenticate the bearer token and reload the user from the database
- *      (so disabled users / revoked roles take effect immediately);
- *   2. platform-only routes accept Super Admins only;
+ *   1. authenticate the bearer token, check its device session is still live,
+ *      and reload the user from the database (so disabled users, revoked
+ *      sessions and removed roles take effect immediately);
+ *   2. platform-only routes accept Super Admins only; account routes
+ *      (@AccountRoute: sign out, devices, password) accept anyone signed in;
  *   3. tenant routes require an active subscription and every module the
- *      route declares (@RequireModules);
+ *      route declares (@RequireModules). A route that declares none requires
+ *      CORE, so a route can never be reachable without a licence;
  *   4. the user must hold every permission the route declares
  *      (@RequirePermissions).
  * Services re-check record-level rules (e.g. "is this customer assigned to
@@ -34,7 +35,7 @@ export interface JwtPayload {
 export class AccessGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly jwt: JwtService,
+    private readonly sessions: SessionService,
     private readonly db: DatabaseService,
     private readonly subscriptions: SubscriptionService,
   ) {}
@@ -49,25 +50,32 @@ export class AccessGuard implements CanActivate {
 
     let payload: JwtPayload;
     try {
-      payload = await this.jwt.verifyAsync<JwtPayload>(header.slice(7));
+      payload = await this.sessions.verify(header.slice(7));
     } catch {
       throw new DomainError('UNAUTHENTICATED', 'Invalid or expired token', HttpStatus.UNAUTHORIZED);
     }
+    if (!payload.sid) throw new DomainError('UNAUTHENTICATED', 'Invalid token', HttpStatus.UNAUTHORIZED);
+    const sessionEnded = () => new DomainError('SESSION_REVOKED', 'This session has been signed out. Please sign in again.', HttpStatus.UNAUTHORIZED);
 
     const platformOnly = this.reflector.getAllAndOverride<boolean>(PLATFORM_ONLY, targets) ?? false;
+    const accountRoute = this.reflector.getAllAndOverride<boolean>(ACCOUNT_ROUTE, targets) ?? false;
     let principal: Principal;
 
     if (payload.typ === 'platform') {
       const admin = await this.db.withPlatform(payload.sub, (tx) =>
-        tx.maybeOne<{ id: string; email: string; is_active: boolean }>(
-          'SELECT id, email, is_active FROM platform_admins WHERE id = $1',
-          [payload.sub],
+        tx.maybeOne<{ id: string; email: string; is_active: boolean; session_live: boolean }>(
+          `SELECT a.id, a.email, a.is_active,
+                  EXISTS (SELECT 1 FROM auth_sessions s WHERE s.id = $2 AND s.platform_admin_id = a.id
+                             AND s.revoked_at IS NULL AND s.expires_at > now()) AS session_live
+             FROM platform_admins a WHERE a.id = $1`,
+          [payload.sub, payload.sid],
         ),
       );
       if (!admin?.is_active) throw new DomainError('UNAUTHENTICATED', 'Account disabled', HttpStatus.UNAUTHORIZED);
-      principal = { kind: 'platform', adminId: admin.id, email: admin.email };
+      if (!admin.session_live) throw sessionEnded();
+      principal = { kind: 'platform', adminId: admin.id, email: admin.email, sessionId: payload.sid };
       req.principal = principal;
-      if (!platformOnly) throw new DomainError('FORBIDDEN', 'Super Admin accounts cannot call tenant APIs', HttpStatus.FORBIDDEN);
+      if (!platformOnly && !accountRoute) throw new DomainError('FORBIDDEN', 'Super Admin accounts cannot call tenant APIs', HttpStatus.FORBIDDEN);
       return true;
     }
 
@@ -75,9 +83,12 @@ export class AccessGuard implements CanActivate {
     if (!payload.tid) throw new DomainError('UNAUTHENTICATED', 'Invalid token', HttpStatus.UNAUTHORIZED);
 
     const loaded = await this.db.withTenant(payload.tid, payload.sub, async (tx) => {
-      const user = await tx.maybeOne<{ id: string; email: string; full_name: string; status: string }>(
-        'SELECT id, email, full_name, status FROM users WHERE id = $1',
-        [payload.sub],
+      const user = await tx.maybeOne<{ id: string; email: string; full_name: string; status: string; session_live: boolean }>(
+        `SELECT u.id, u.email, u.full_name, u.status,
+                EXISTS (SELECT 1 FROM auth_sessions s WHERE s.id = $2 AND s.user_id = u.id
+                           AND s.revoked_at IS NULL AND s.expires_at > now()) AS session_live
+           FROM users u WHERE u.id = $1`,
+        [payload.sub, payload.sid],
       );
       if (!user) return null;
       const perms = await tx.query<{ permission_code: string; approval_level: number }>(
@@ -89,13 +100,14 @@ export class AccessGuard implements CanActivate {
         [payload.sub],
       );
       const ent = await this.subscriptions.entitlementsTx(tx);
-      return { user, perms, ent };
+      return { user, perms, ent, timezone: tx.timezone };
     });
 
     if (!loaded || loaded.user.status !== 'ACTIVE') {
       throw new DomainError('UNAUTHENTICATED', 'Account disabled', HttpStatus.UNAUTHORIZED);
     }
-    const { user, perms, ent } = loaded;
+    const { user, perms, ent, timezone } = loaded;
+    if (!user.session_live) throw sessionEnded();
 
     principal = {
       kind: 'user',
@@ -106,14 +118,19 @@ export class AccessGuard implements CanActivate {
       permissions: new Set(perms.map((p) => p.permission_code).filter(Boolean)),
       approvalLevel: perms.reduce((m, p) => Math.max(m, Number(p.approval_level)), 0),
       modules: ent.modules,
+      sessionId: payload.sid,
+      timezone,
     };
     req.principal = principal;
+    if (accountRoute) return true;
 
     if (!ent.active) {
       throw new DomainError(ent.reason ?? 'SUBSCRIPTION_INACTIVE', subscriptionMessage(ent.reason), HttpStatus.PAYMENT_REQUIRED);
     }
 
-    const needModules = this.reflector.getAllAndMerge<string[]>(REQUIRED_MODULES, targets) ?? [];
+    const declared = this.reflector.getAllAndMerge<string[]>(REQUIRED_MODULES, targets) ?? [];
+    // Fail closed: a route that names no module still needs the CORE licence.
+    const needModules = declared.length ? declared : [MODULES.CORE];
     const missingModules = needModules.filter((m) => !ent.modules.has(m));
     if (missingModules.length) {
       throw new DomainError('MODULE_NOT_SUBSCRIBED', `Your subscription does not include: ${missingModules.join(', ')}`, HttpStatus.PAYMENT_REQUIRED, {

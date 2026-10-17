@@ -416,7 +416,7 @@ export class ReportsService {
       if (e instanceof DomainError) return [] as string[];
       throw e;
     });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = tx.today();
     const month = `${today.slice(0, 7)}-01`;
     const ent = await this.subs.entitlementsTx(tx);
     const k = await tx.one<Record<string, string>>(

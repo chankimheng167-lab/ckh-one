@@ -159,7 +159,7 @@ export class FulfilmentService {
 
     const acc = await this.journal.accounts(tx);
     const je = await this.journal.post(tx, {
-      date: today(),
+      date: tx.today(),
       description: `Cost of goods shipped ${number} (order ${order.number})`,
       sourceType: 'DELIVERY',
       sourceId: dn.id,
@@ -233,7 +233,7 @@ export class FulfilmentService {
     if (cogsReversal.gt(0)) {
       const acc = await this.journal.accounts(tx);
       await this.journal.post(tx, {
-        date: today(),
+        date: tx.today(),
         description: `Goods not delivered on ${dn.number} returned to stock`,
         sourceType: 'DELIVERY',
         sourceId: dn.id,
@@ -413,8 +413,4 @@ export class FulfilmentService {
     );
     return Number(r.open) === 0;
   }
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }

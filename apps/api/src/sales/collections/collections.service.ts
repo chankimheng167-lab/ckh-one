@@ -82,7 +82,7 @@ export class CollectionsService {
     if (c.created_by === user.userId) throw forbidden('You cannot verify a collection you submitted');
     const acc = await this.journal.accounts(tx);
     const deposit = (input.depositTo ?? (c.payment_method === 'CASH' ? 'CASH' : 'BANK')) === 'CASH' ? acc.cash : acc.bank;
-    const receiptDate = input.receiptDate ?? new Date().toISOString().slice(0, 10);
+    const receiptDate = input.receiptDate ?? tx.today();
 
     const number = await this.numbering.next(tx, 'RECEIPT');
     const rc = await tx.one<{ id: string }>(

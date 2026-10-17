@@ -3,6 +3,7 @@ import { MODULES, P } from '@ckh/shared';
 import { z } from 'zod';
 import { CurrentUser, RequireModules, RequirePermissions, TenantUser } from '../common/auth-context';
 import { decimalString, isoDate, parse, positiveDecimal, uuid } from '../common/validation';
+import { businessDate } from '../common/business-time';
 import { DatabaseService, Tx } from '../db/database.service';
 import { CommissionsService } from './commissions/commissions.service';
 import { OrderLineInput } from './orders/order.schemas';
@@ -444,7 +445,7 @@ export class CommissionsController extends Base {
   @RequirePermissions(P.SALES_COMMISSIONS_MANAGE)
   clawbacks(@CurrentUser() user: TenantUser, @Body() body: unknown) {
     const { asOf } = parse(z.object({ asOf: isoDate.optional() }), body ?? {});
-    return this.tx(user, (tx) => this.svc.runClawbacks(tx, asOf ?? new Date().toISOString().slice(0, 10)));
+    return this.tx(user, (tx) => this.svc.runClawbacks(tx, asOf ?? businessDate(user.timezone)));
   }
 
   @Post('approve')
