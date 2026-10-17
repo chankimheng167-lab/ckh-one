@@ -1,12 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { ALL_TENANT_PERMISSIONS, MODULES, P } from '@ckh/shared';
 import * as bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { CurrentUser, RequireModules, RequirePermissions, TenantUser } from '../../common/auth-context';
 import { AuditService } from '../../common/audit.service';
 import { DomainError, notFound } from '../../common/errors';
-import { decimalString, parse, uuid } from '../../common/validation';
+import { decimalString, newPassword, parse, uuid } from '../../common/validation';
 import { DatabaseService } from '../../db/database.service';
+import { SessionService } from '../auth/session.service';
 
 const CreateUser = z.object({
   email: z.string().email(),
@@ -59,7 +60,11 @@ const SalesSettingsInput = z.object({
 
 @Controller('admin')
 export class TenantAdminController {
-  constructor(private readonly db: DatabaseService, private readonly audit: AuditService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
+    private readonly sessions: SessionService,
+  ) {}
 
   @Get('roles')
   @RequirePermissions(P.TENANT_ROLES_MANAGE)
@@ -125,8 +130,50 @@ export class TenantAdminController {
     return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
       const r = await tx.maybeOne('UPDATE users SET status = $2 WHERE id = $1 RETURNING id, status', [id, status]);
       if (!r) throw notFound('User');
+      if (status === 'DISABLED') await this.sessions.revoke(tx, { userId: id }, 'USER_DISABLED');
       await this.audit.record(tx, { action: 'USER_STATUS_CHANGED', entityType: 'user', entityId: id, after: { status } });
       return r;
+    });
+  }
+
+  /** A user's signed-in devices. */
+  @Get('users/:id/sessions')
+  @RequirePermissions(P.TENANT_USERS_MANAGE)
+  userSessions(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      if (!(await tx.maybeOne('SELECT 1 FROM users WHERE id = $1', [id]))) throw notFound('User');
+      return this.sessions.list(tx, { userId: id }, user.sessionId);
+    });
+  }
+
+  /** Signs a user out everywhere, or from one device (lost or stolen phone). */
+  @Post('users/:id/revoke-sessions')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.TENANT_USERS_MANAGE)
+  revokeUserSessions(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const { sessionId } = parse(z.object({ sessionId: uuid.optional() }), body ?? {});
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      if (!(await tx.maybeOne('SELECT 1 FROM users WHERE id = $1', [id]))) throw notFound('User');
+      const revoked = await this.sessions.revoke(tx, { userId: id, sessionId }, 'REVOKED_BY_ADMIN');
+      await this.audit.record(tx, { action: 'USER_SESSIONS_REVOKED', entityType: 'user', entityId: id, after: { sessionId: sessionId ?? 'ALL', revoked } });
+      return { revoked };
+    });
+  }
+
+  /** Sets a new password for a user, clears any lockout and signs them out everywhere. */
+  @Put('users/:id/password')
+  @RequirePermissions(P.TENANT_USERS_MANAGE)
+  resetPassword(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const { password } = parse(z.object({ password: newPassword }), body);
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => {
+      const r = await tx.maybeOne(
+        `UPDATE users SET password_hash = $2, password_changed_at = now(), failed_login_count = 0, locked_until = NULL WHERE id = $1 RETURNING id`,
+        [id, await bcrypt.hash(password, 10)],
+      );
+      if (!r) throw notFound('User');
+      const revoked = await this.sessions.revoke(tx, { userId: id }, 'PASSWORD_RESET');
+      await this.audit.record(tx, { action: 'USER_PASSWORD_RESET', entityType: 'user', entityId: id, after: { sessionsRevoked: revoked } });
+      return { id, sessionsRevoked: revoked };
     });
   }
 

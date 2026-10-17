@@ -269,7 +269,7 @@ export class CommissionsService {
       );
       const amt = D(total.s);
       const je = await this.journal.post(tx, {
-        date: new Date().toISOString().slice(0, 10),
+        date: tx.today(),
         description: `Commission accrual ${month.slice(0, 7)}`,
         sourceType: 'COMMISSION',
         sourceId: r.sales_rep_id,

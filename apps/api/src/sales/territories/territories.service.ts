@@ -164,7 +164,7 @@ export class TerritoriesService {
       }
       if (c.current_rep && !reassign) { skipped += 1; continue; }
       if (c.current_id) {
-        if (c.current_from && c.current_from >= new Date().toISOString().slice(0, 10)) {
+        if (c.current_from && c.current_from >= tx.today()) {
           await tx.query('DELETE FROM sales_customer_assignments WHERE id = $1', [c.current_id]);
         } else {
           await tx.query('UPDATE sales_customer_assignments SET valid_to = CURRENT_DATE - 1 WHERE id = $1', [c.current_id]);

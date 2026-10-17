@@ -8,6 +8,7 @@ import { AllExceptionsFilter } from './common/errors';
 import { loadConfig } from './config';
 import { AccessGuard } from './core/auth/access.guard';
 import { AuthController } from './core/auth/auth.controller';
+import { SessionService } from './core/auth/session.service';
 import { HealthController } from './core/health.controller';
 import { MasterDataController } from './core/masterdata/masterdata.controller';
 import { NumberingService } from './core/numbering.service';
@@ -62,7 +63,7 @@ export class CoreInfraModule {}
       global: true,
       useFactory: () => {
         const cfg = loadConfig();
-        return { secret: cfg.jwtSecret, signOptions: { expiresIn: cfg.jwtTtlSeconds } };
+        return { secret: cfg.jwtSecret, signOptions: { expiresIn: cfg.jwtTtlSeconds, algorithm: 'HS256' }, verifyOptions: { algorithms: ['HS256'] } };
       },
     }),
   ],
@@ -92,6 +93,7 @@ export class CoreInfraModule {}
     AccountingController,
   ],
   providers: [
+    SessionService,
     TenantProvisioningService,
     SalesContextService,
     PricingService,

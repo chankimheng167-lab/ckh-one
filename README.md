@@ -68,7 +68,9 @@ pnpm dev                            # http://localhost:3100
 pnpm build
 ```
 
-Sign in with company code `demo` and one of the demo logins above. The app is a static export, so it can be hosted on any static host; set `CORS_ORIGINS` on the API to the app's origin. Offline ordering needs the **Offline Mobile Ordering** module on the tenant.
+Sign in with company code `demo` and one of the demo logins above. The Super Admin (platform owner) signs in at
+`http://localhost:3100/platform/` with `superadmin@ckh.one` to create client companies and switch their modules,
+subscription and status. The app is a static export, so it can be hosted on any static host; set `CORS_ORIGINS` on the API to the app's origin. Offline ordering needs the **Offline Mobile Ordering** module on the tenant.
 
 **Never run the API with the database owner or a superuser account.** Superusers bypass row-level security, and the app login must not be able to change the schema.
 
@@ -90,9 +92,28 @@ End-to-end tests need a Postgres superuser URL in `TEST_PG_ADMIN_URL` (default `
 | `DATABASE_URL` | Restricted app login (member of `ckh_app`) |
 | `MIGRATION_DATABASE_URL` | Owner login for migrations and seeding |
 | `JWT_SECRET` | ≥ 32 characters in production |
-| `JWT_TTL_SECONDS` | Access token lifetime (default 8 h) |
-| `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` | First Super Admin (seed) |
-| `SEED_DEMO` | `false` to skip the demo company |
-| `CORS_ORIGINS` | Comma-separated allowed origins |
+| `JWT_TTL_SECONDS` | Access token lifetime (default 900 s = 15 min) |
+| `REFRESH_TTL_DAYS` | Device session lifetime, sliding (default 30) |
+| `REFRESH_REUSE_GRACE_SECONDS` | Tolerance for two tabs refreshing at once (default 30) |
+| `LOGIN_MAX_FAILURES`, `LOGIN_LOCK_MINUTES` | Account lockout (default 5 failures → 15 min) |
+| `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` | First Super Admin (seed). Password required in production |
+| `SEED_DEMO`, `DEMO_PASSWORD` | Demo company: on by default in development, off in production unless `SEED_DEMO=true` with a non-public `DEMO_PASSWORD` |
+| `CORS_ORIGINS` | Comma-separated allowed origins (required in production) |
 
-See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for what is built and what is next.
+## Sign-in and sessions
+
+`POST /auth/login` (company users) and `POST /auth/platform/login` (Super Admin) return a short-lived
+`accessToken` and a `refreshToken`. Each sign-in is a device session: `POST /auth/refresh` swaps the refresh
+token for a new pair (the old one stops working, and replaying an old one signs that device out),
+`POST /auth/logout` ends the session, `GET /auth/sessions` / `DELETE /auth/sessions/:id` list and sign out
+devices, and `POST /auth/password` changes the password and signs out every other device. Administrators can
+sign a user out (`POST /admin/users/:id/revoke-sessions`) or reset a password (`PUT /admin/users/:id/password`).
+
+Business dates (order dates, "today" in reports, document-number years) use the company's time zone
+(`Asia/Phnom_Penh` for Cambodian companies), set by the Super Admin with `PUT /platform/tenants/:id/settings`.
+
+The demo logins above are for local development only: production refuses the public demo password.
+
+See [docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md) for the requirement comparison, missing features and roadmap,
+[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for what is built, and
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production deployment.

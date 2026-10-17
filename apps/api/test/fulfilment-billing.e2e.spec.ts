@@ -319,4 +319,11 @@ describe('Ledger integrity', () => {
     );
     expect(ar).toBeCloseTo(Number(open[0].s), 2);
   });
+
+  it('the integrity endpoint agrees after deliveries, invoices, receipts, returns and credit notes', async () => {
+    const r = await acct().get('/accounting/integrity');
+    expect(r.status).toBe(200);
+    expect(r.body.checks.filter((c: { ok: boolean }) => !c.ok)).toEqual([]);
+    expect(r.body.ok).toBe(true);
+  });
 });

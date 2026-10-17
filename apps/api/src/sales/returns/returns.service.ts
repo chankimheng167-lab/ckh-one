@@ -96,7 +96,7 @@ export class ReturnsService {
     if (costBack.gt(0)) {
       const acc = await this.journal.accounts(tx);
       await this.journal.post(tx, {
-        date: new Date().toISOString().slice(0, 10),
+        date: tx.today(),
         description: `Returned goods restocked ${ret.number}`,
         sourceType: 'SALES_RETURN',
         sourceId: returnId,

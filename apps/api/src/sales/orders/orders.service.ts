@@ -167,7 +167,7 @@ export class OrdersService {
       [orderId],
     );
     const pricingCtx = await this.pricing.customerContext(tx, order.customer_id);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = tx.today();
     const built = await this.buildLines(
       tx,
       pricingCtx,
@@ -581,7 +581,7 @@ export class OrdersService {
     if (paymentTermsDays > cust.payment_terms_days && !has(user, P.CUSTOMERS_CREDIT_MANAGE)) {
       throw new DomainError('TERMS_EXCEED_CUSTOMER', `Payment terms cannot exceed the customer's ${cust.payment_terms_days} days`, 422);
     }
-    const orderDate = input.orderDate ?? new Date().toISOString().slice(0, 10);
+    const orderDate = input.orderDate ?? tx.today();
     return { branchId, warehouseId, deliveryAddressId, paymentTermsDays, orderDate };
   }
 

@@ -76,7 +76,7 @@ export class InvoicingService {
       .filter((x) => x.qty.gt(0));
     if (toBill.length === 0) throw conflict('NOTHING_TO_INVOICE', 'Everything shipped on this order has already been invoiced');
 
-    const invoiceDate = opts.invoiceDate ?? today();
+    const invoiceDate = opts.invoiceDate ?? tx.today();
     const priced: { l: OrderLineRow; qty: Decimal; a: Amounts }[] = [];
     for (const { l, qty } of toBill) priced.push({ l, qty, a: await this.amountsForInvoice(tx, l, qty, order.currency) });
     const sum = (k: keyof Amounts) => priced.reduce((acc, p) => acc.plus(p.a[k]), D(0));
@@ -180,7 +180,7 @@ export class InvoicingService {
     if (total.lte(0)) return null;
 
     const number = await this.numbering.next(tx, 'CREDIT_NOTE');
-    const date = today();
+    const date = tx.today();
     const cn = await tx.one<{ id: string }>(
       `INSERT INTO credit_notes (tenant_id, number, customer_id, credit_date, reason, currency, subtotal, tax_total, grand_total,
           sales_order_id, sales_return_id, created_by)
@@ -305,8 +305,4 @@ export class InvoicingService {
     const p = priceLine({ quantity: qty.toString(), unitPrice: l.unit_price, discountPercent: l.discount_percent, taxRatePercent: l.tax_rate_percent }, currency);
     return { gross: D(p.grossAmount), discount: D(p.discountAmount), net: D(p.netAmount), tax: D(p.taxAmount), total: D(p.lineTotal) };
   }
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }

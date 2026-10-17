@@ -222,3 +222,15 @@ describe('Theme Studio', () => {
     expect((await api.as(other.tokens.rep).get('/theme')).body.cssVariables['--ckh-primary']).toBe('#1f6feb');
   });
 });
+
+describe('Accounting consistency after offline replay', () => {
+  it('books balance and receivables match the sub-ledger once every queued event is replayed', async () => {
+    const accountant = api.as(co.tokens.accountant);
+    // Verify any collections the replays submitted, so receipts post to the ledger too.
+    const pending = (await accountant.get('/sales/collections?status=PENDING_VERIFICATION')).body;
+    for (const c of Array.isArray(pending) ? pending : []) await accountant.post(`/sales/collections/${c.id}/verify`, {});
+    const r = await accountant.get('/accounting/integrity');
+    expect(r.status).toBe(200);
+    expect(r.body.checks.filter((c: { ok: boolean }) => !c.ok)).toEqual([]);
+  });
+});

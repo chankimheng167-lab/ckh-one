@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
 import { Authed } from '@/components/Authed';
 import { Card, ErrorBox, Loading, Page } from '@/components/ui';
 import { qs } from '@/lib/api';
@@ -53,7 +54,6 @@ function TerritoryMap() {
       <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" />
       <label className="row small"><input type="checkbox" checked={visits} onChange={(e) => setVisits(e.target.checked)} /> Visit check-ins</label>
     </>}>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <ErrorBox error={error} />
       {loading && !data && <Loading />}
       <div ref={el} className="map" />

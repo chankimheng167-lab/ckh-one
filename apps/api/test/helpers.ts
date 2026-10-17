@@ -3,6 +3,10 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
+import { businessDate } from '../src/common/business-time';
+
+/** Today's business date for test companies (Cambodia, UTC+7), as the API computes it. */
+export const localToday = () => businessDate('Asia/Phnom_Penh');
 
 /** Jest runs globalSetup in a separate context; recompute the URLs here. */
 function urls() {
@@ -20,9 +24,11 @@ export async function bootApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = urls().appUrl;
   process.env.JWT_SECRET = 'test-secret-test-secret-test-secret!';
   const { AppModule } = await import('../src/app.module');
+  const { applySecurity } = await import('../src/main');
   const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = mod.createNestApplication({ logger: false });
   app.setGlobalPrefix('api/v1');
+  applySecurity(app);
   await app.init();
   return app;
 }
@@ -31,7 +37,7 @@ export const ownerUrl = () => urls().ownerUrl;
 
 export class Api {
   constructor(private readonly app: INestApplication, public token?: string) {}
-  private req(method: 'get' | 'post' | 'put', path: string, body?: unknown) {
+  private req(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown) {
     let r = request(this.app.getHttpServer())[method](`/api/v1${path}`);
     if (this.token) r = r.set('Authorization', `Bearer ${this.token}`);
     return body === undefined ? r : r.send(body as object);
@@ -39,6 +45,7 @@ export class Api {
   get = (p: string) => this.req('get', p);
   post = (p: string, b?: unknown) => this.req('post', p, b ?? {});
   put = (p: string, b?: unknown) => this.req('put', p, b ?? {});
+  del = (p: string) => this.req('delete', p);
   as = (token: string) => new Api(this.app, token);
 }
 
