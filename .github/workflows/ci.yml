@@ -26,8 +26,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # Add `cache: pnpm` once pnpm-lock.yaml is committed.
-      - run: pnpm install
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ckh/shared build
       - name: Unit tests (shared domain logic)
         run: pnpm --filter @ckh/shared test
@@ -51,3 +51,7 @@ jobs:
           done
       - name: API end-to-end tests
         run: pnpm --filter @ckh/api test
+      - name: Type-check and build the web app
+        run: |
+          pnpm --filter @ckh/web typecheck
+          pnpm --filter @ckh/web build

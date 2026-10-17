@@ -13,9 +13,11 @@ apps/
     src/core/          auth, Super Admin platform, tenant admin, master data, subscriptions
     src/sales/         Sales Force Automation module
     test/              end-to-end API tests (real Postgres)
+  web/                 Next.js sales app: mobile-first PWA, works offline (IndexedDB outbox)
 packages/
   shared/              domain logic shared by API and apps: permissions, subscription
-                       modules, order state machine, pricing math, approval policy
+                       modules, order state machine, pricing math, approval policy,
+                       commission rules, Theme Studio tokens
 docs/                  architecture notes and implementation status
 ```
 
@@ -56,6 +58,18 @@ The API listens on `http://localhost:3001/api/v1`. Demo logins (company code `de
 `admin@`, `manager@`, `supervisor@`, `rep@`, `warehouse@`, `accountant@demo.ckh.one`.
 Super Admin: `superadmin@ckh.one` via `POST /auth/platform/login`.
 
+### Web app
+
+```bash
+cd apps/web
+cp .env.example .env.local          # NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
+pnpm dev                            # http://localhost:3100
+# or a production build (static files in apps/web/out, serve them from any web server or CDN):
+pnpm build
+```
+
+Sign in with company code `demo` and one of the demo logins above. The app is a static export, so it can be hosted on any static host; set `CORS_ORIGINS` on the API to the app's origin. Offline ordering needs the **Offline Mobile Ordering** module on the tenant.
+
 **Never run the API with the database owner or a superuser account.** Superusers bypass row-level security, and the app login must not be able to change the schema.
 
 ## Tests
@@ -63,6 +77,8 @@ Super Admin: `superadmin@ckh.one` via `POST /auth/platform/login`.
 ```bash
 pnpm --filter @ckh/shared test     # unit tests: pricing, approvals, workflow
 pnpm --filter @ckh/api test        # end-to-end: creates a throwaway database
+pnpm --filter @ckh/web build      # type-check and build the web app
+node apps/web/scripts/smoke.cjs    # browser smoke test (API + web app running, demo data seeded)
 ```
 
 End-to-end tests need a Postgres superuser URL in `TEST_PG_ADMIN_URL` (default `postgres://postgres@localhost:5432/postgres`). GitHub Actions runs everything on each push (`.github/workflows/ci.yml`).

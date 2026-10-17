@@ -1,60 +1,108 @@
 # CKH ONE Sales Force Automation — Implementation Status
 
-_Last updated: 2026-10-17 · Phase 1 of 5_
+_Last updated: 2026-10-17 · all 5 phases built_
 
-The repository was empty when work began, so Phase 1 also builds the platform
+The repository was empty when work began, so Phase 1 also built the platform
 foundation the SFA spec expects to reuse (tenancy, auth, roles, subscriptions,
-master data, inventory, accounting tables).
+master data, inventory, accounting).
 
 ## How this was verified
 
-| Check | Status |
+Everything below was run locally on PostgreSQL 16 / Node 22 before delivery.
+
+| Check | Result |
 |---|---|
-| All migrations apply cleanly on PostgreSQL 16 | ✅ verified |
-| Database guards (`db/tests/schema_guards.sql`): tenant isolation via RLS, tenants cannot enable their own modules, composite FKs block cross-tenant references, anti-oversell, balanced journals, append-only audit log | ✅ verified |
-| Every SQL statement in the API (175) prepared against the real schema | ✅ verified |
-| TypeScript syntax of all files | ✅ verified |
-| TypeScript type-check, unit tests, end-to-end tests | ⏳ **not yet run** — the build environment could not download npm packages. They run in GitHub Actions on first push, or locally with `pnpm install && pnpm test`. Expect a small number of compile fixes on the first run. |
+| Migrations 0001–0007 + row-level security apply cleanly to an empty database | ✅ |
+| Database guard checks (`db/tests/schema_guards.sql`): RLS isolation, tenants cannot enable their own modules, composite FKs block cross-tenant references, anti-oversell trigger, balanced journals, append-only audit log | ✅ all 7 guards fire |
+| `@ckh/shared` unit tests (pricing, approvals, workflow, commission rules) | ✅ 16 / 16 |
+| API type-check | ✅ |
+| API end-to-end tests against a real database (6 suites) | ✅ **74 / 74** |
+| Web app type-check and production build (23 static routes) | ✅ |
+| Browser smoke test (Chromium, phone and desktop sizes, 4 roles, every screen; online order, then an order taken offline, queued, and accepted after reconnecting) | ✅ no errors |
 
-## Phase 1 — foundation + order core (this delivery)
+The spec's required end-to-end scenarios and where they are tested:
 
-**Platform**
+| Scenario | Test |
+|---|---|
+| Salesperson creating an order | `sales-orders.e2e.spec.ts` |
+| Discount approval | `sales-orders.e2e.spec.ts` |
+| Stock reservation | `sales-orders.e2e.spec.ts`, `fulfilment-billing.e2e.spec.ts` |
+| Order fulfilment | `fulfilment-billing.e2e.spec.ts` |
+| Invoice generation | `fulfilment-billing.e2e.spec.ts` |
+| Payment verification | `fulfilment-billing.e2e.spec.ts` |
+| Offline order synchronisation | `offline-sync.e2e.spec.ts` (+ browser smoke test) |
+| Tenant isolation | `tenancy-subscription.e2e.spec.ts`, `offline-sync.e2e.spec.ts`, `reports.e2e.spec.ts` |
+| Subscription expiration | `tenancy-subscription.e2e.spec.ts`, `offline-sync.e2e.spec.ts` |
+
+## What is built
+
+### Phase 1 — platform foundation and order core
 - Multi-tenant schema with composite `(tenant_id, id)` foreign keys and forced row-level security on every tenant table.
-- Super Admin API: create tenants (fully provisioned: roles, chart of accounts, tax, numbering, branch, warehouse), switch modules on/off per tenant with prerequisite checks, set subscription dates/grace, suspend tenants.
-- JWT auth for tenant users and Super Admins; users, roles, permissions and approval levels reloaded from the database on every request.
-- One global access guard: authentication → active subscription → required modules → required permissions, on every route.
+- Super Admin API: provision tenants, switch modules per tenant (with prerequisite checks), subscription dates and grace period, suspension.
+- JWT auth; users, roles, permissions and approval levels reloaded on every request. One global guard: authentication → active subscription → modules → permissions.
 - Append-only audit log for every state change.
-- Master data: products (variants, units, images), price lists (tiers, quantity breaks, validity), promotions, customers (groups, addresses, credit limit, credit hold, special discount), stock levels and movements, goods receipt with weighted-average cost.
-- Configurable administrative locations (provinces/districts/communes) with validity dates, platform-wide or per tenant — nothing hardcoded.
+- Master data: products (variants, units, images), price lists (tiers, quantity breaks, validity), promotions, customers (groups, addresses with coordinates, credit limit/hold, special discount), stock with weighted-average cost.
+- Sales orders: drafts, optimistic locking, idempotent create, server-side pricing and VAT, submit-time revalidation (price, tax, stock, credit, permissions), discount/amount/credit approval tiers, configurable workflow, stock reservation with an oversell-proof trigger.
 
-**Sales Force Automation**
-- All 19 required `sales_*` tables, plus `sales_settings` and `sales_territory_locations`.
-- Six subscription modules (Sales Team Basic, Order Management, Territory, Commission, Advanced Analytics, Offline Ordering) and six default roles.
-- My Customers / Customer Profile API with record-level access (rep → assigned; supervisor → team; manager → all) and balances shown only when permitted.
-- Product catalog API: search, category filter, variants, units, promotions, customer-specific price, stock only for authorised warehouses, `stock_as_of` timestamp for stale-data display.
-- Sales orders: drafts, optimistic locking, idempotent create (`clientReference`), server-side pricing (client prices rejected unless the tenant allows overrides; overrides count as discount for approval), VAT, KHR/USD rounding.
-- Submit revalidates price, tax, stock, credit and permissions, then auto-approves or routes to approval.
-- Approval policy: discount tiers (rep / supervisor / manager / director), order amount thresholds, credit limit and credit hold (accountant), per-rep and per-customer allowances. Self-approval blocked.
-- Configurable workflow (pick/pack optional, invoice on dispatch or delivery) with full status history.
-- Stock reservation with row locks, partial reservation + backorder, release on cancel, and a database trigger that makes overselling impossible in centrally controlled warehouses.
+### Phase 2 — fulfilment, invoicing, collections
+- Picking list, start picking, pack, dispatch (delivery note), delivery confirmation with partial acceptance (rejected goods return to stock and are re-reserved, COGS reversed), backorder reservation and short-close.
+- Invoices posted to the ledger (AR, discount, revenue, VAT); COGS at dispatch; revenue recognition on delivery or manual.
+- Returns with restock at shipped cost and credit notes for the invoiced part.
+- Field payment collections: rep submits → accountant verifies (no self-verification) → customer receipt, allocation to the named invoice then oldest, ledger posting, auto-close of settled orders.
 
-**Tests written (to run in CI)**: order creation and pricing, idempotency, customer access, auto-approval, discount approval tiers, rejection/revision, credit approval, stock reservation and release, concurrent reservation, tenant isolation, module switch-off, subscription expiry and grace period, suspension, Super-Admin-only routes.
+### Phase 3 — quotations, visits, territories, targets, commissions
+- Quotations: server-priced, send/accept/reject/cancel, expiry, conversion to a draft order at today's prices with a price-change flag.
+- Visits: scheduling, check-in with **consent-based location** (company policy OFF / ASK / REQUIRED; nothing stored without the rep's consent for that check-in), check-out with outcome, notes and follow-up tasks, supervisor review; orders linked to an active visit.
+- Territories: hierarchy with cycle protection, administrative locations (import/upsert, versioned), primary/backup reps, bulk assignment of customers by location (including sub-locations).
+- Targets per rep/team/territory and month/quarter/year for net sales, collections, order count, quantity, new customers and visits, with achievement and pacing.
+- Commission plans (invoiced net sales, collected amount or gross profit; product/category/customer/group rates; achievement tiers; overdue clawback and reinstatement), approval with ledger accrual, payroll batch hand-off and HR "mark paid".
 
-## Remaining phases
+### Phase 4 — offline ordering and the web app
+- `GET /sales/sync/bootstrap`: the rep's customers, catalogue with stock per authorised warehouse, price lists, tax codes, planned visits, and when the data becomes stale.
+- `POST /sales/sync`: batched outbox replay. Each event is its own transaction, idempotent by key (same key + different payload = `CONFLICT`), re-checks subscription, modules and permissions, and goes through the normal services. Orders are re-priced; a total different from what the device showed is routed for approval (`OFFLINE_PRICE_CHANGE`); stale catalogues and backorders are reported back. Visits, visit notes (linked by `visitKey` within a batch) and collections sync too.
+- Theme Studio: validated design tokens per tenant served as CSS variables (also on the sign-in page by company code), with contrast warnings.
+- `apps/web`: Next.js static PWA with all 18 required screens, responsive (bottom navigation on phones, sidebar on desktop), Dexie/IndexedDB snapshot and outbox, automatic sync on reconnect, service worker for opening the app offline, and stale-stock badges wherever offline data is shown.
 
-| Phase | Scope |
-|---|---|
-| 2 — Fulfilment, invoicing, collections | Picking lists, pack, dispatch, delivery notes, partial delivery, returns; invoice generation with journal posting (AR / revenue / VAT) and COGS on delivery; payment collection submissions → accountant verification → customer receipt + allocation; credit notes. E2E: fulfilment, invoice, payment verification. |
-| 3 — Visits, territories, targets, commissions | Visit scheduling and check-in with consent-based location; notes and follow-up tasks; territories and Cambodian location import; targets (rep/team/territory, month/quarter); commission plans, calculation, clawbacks, approval, payroll export. |
-| 4 — Offline sync + PWA | Sync endpoint using `sales_offline_sync_events` (idempotency keys, payload hashing, revalidation, conflict results); Next.js PWA with all 18 pages, IndexedDB outbox, stale-stock indicators, Theme Studio tokens; E2E: offline order sync. |
-| 5 — Reports & analytics | All 11 reports with Excel and PDF export; dashboards; Team Performance; Territory Map. |
+| # | Screen | Route |
+|---|---|---|
+| 1 | Sales Dashboard | `/` |
+| 2 | My Customers | `/customers/` |
+| 3 | Customer Profile | `/customers/view/?id=` |
+| 4 | Product Catalog | `/catalog/` |
+| 5 | Product Details | `/catalog/view/?id=` |
+| 6 | Create Sales Order | `/orders/new/` |
+| 7 | Sales Order Details | `/orders/view/?id=` |
+| 8 | My Orders | `/orders/` |
+| 9 | Pending Approvals | `/approvals/` |
+| 10 | Delivery Tracking | `/deliveries/` |
+| 11 | Customer Visits | `/visits/` |
+| 12 | Payment Collections | `/collections/` |
+| 13 | Sales Targets | `/targets/` |
+| 14 | Commission Dashboard | `/commissions/` |
+| 15 | Sales Territory Map | `/territories/` |
+| 16 | Team Performance | `/team/` |
+| 17 | Sales Reports | `/reports/` |
+| 18 | Sales Settings (incl. Theme Studio) | `/settings/` |
+| + | Offline queue | `/sync/` |
+
+### Phase 5 — reports and analytics
+- 11 reports at `GET /sales/reports/:code` (`format=json|xlsx|pdf`): sales by representative, team, territory, customer and product; order conversion; target achievement; discount analysis; customer balances with ageing; commissions; customer visits. Scoped to what the user may see and gated by subscription module (Advanced Analytics, Territory, Commission).
+- Mobile sales dashboard, team performance, and territory map data (customer points sized by sales, consented visit check-ins only).
 
 ## Known issues and decisions to review
 
-1. **Not yet compiled or run end-to-end** (see above). First CI run is the real test.
-2. `pnpm-lock.yaml` is not committed yet (generated on first `pnpm install`); commit it afterwards for reproducible builds.
-3. Credit exposure assumes one currency per tenant. Multi-currency customers need exchange-rate conversion before comparing to the credit limit.
-4. Access tokens are stateless JWTs (8 h). Disabling a user takes effect immediately (users are reloaded per request), but there is no refresh-token rotation or device revocation yet.
-5. Commission accrual posting to the ledger and payroll integration depend on the HR & Payroll module, which does not exist yet; Phase 3 will define the hand-off table.
-6. Cambodian administrative location data must be imported from an official, current source; the schema supports versioning but no dataset is bundled.
-7. Receipt photo uploads for collections need object storage (e.g. S3-compatible); the column stores a storage key only.
+1. **Not pushed to GitHub yet.** GitHub was not connected to this workspace, so the code is delivered as files. CI (`.github/workflows/ci.yml`) runs the same checks on first push.
+2. **Dates use UTC.** "Today", default report ranges and visit dates are computed in UTC. Cambodia is UTC+7, so activity between 00:00 and 07:00 local time lands on the previous day. Fix: store a tenant time zone and compute business dates with it.
+3. **Order line ids change on submit.** Submit re-prices and re-inserts the lines; anything referencing a line (e.g. a return) must read the order after submit. Harmless today, but a future API should keep line ids stable.
+4. **Offline catalogue size.** The snapshot carries up to 5,000 products and is a full download each time; large catalogues need paging and delta sync (`since` is accepted but not used yet).
+5. **Offline orders from a stale catalogue are accepted** (and flagged). If the company prefers to block them, that is a one-line policy change in `SyncService`.
+6. **Sign-in token lives in browser storage.** Fine for a PWA that must work offline, but it is readable by any injected script; keep a strict Content-Security-Policy and consider short-lived tokens with refresh. There is no refresh-token rotation or device revocation yet.
+7. **Admin screens for teams, territories and commission plans are API-only.** The web app covers the 18 required screens; creating territories, assigning reps and editing commission plans is done through the API (or a later admin screen). Quotations and return requests also have full APIs but no dedicated screens.
+8. **HR & Payroll is a hand-off only.** Commission batches are sent to `hr/payroll/commission-batches` and marked paid there; there is no payroll engine yet.
+9. **Notifications are not sent.** Approvers, reps and accountants see their work in the app, but no push, SMS or email notifications exist yet.
+10. **Map tiles** come from the public OpenStreetMap servers and Leaflet's stylesheet from unpkg. Production use needs a tile provider agreement (or self-hosted tiles).
+11. Credit exposure assumes one currency per tenant; multi-currency customers need exchange-rate conversion.
+12. No Cambodian administrative location dataset is bundled; import one from an official, current source with `POST /locations/import`. Platform-wide (all tenants) import is not exposed yet.
+13. Collection receipt photos need object storage; the API stores a storage key only.
+14. Territory sales reports use each customer's current territory, not the territory at the time of the sale.
+15. The browser smoke test (`apps/web/scripts/smoke.cjs`) is run manually against a seeded demo company; it is not part of CI yet.
