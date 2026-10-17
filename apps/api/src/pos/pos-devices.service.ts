@@ -92,7 +92,9 @@ export class PosDevicesService {
     return { deviceId: device.id, status: 'ACTIVE', serverTime: new Date().toISOString(), license: await this.issue(tx, device), publicKey: this.licenses.publicKeyPem() };
   }
 
-  async list(tx: Tx) {
+  /** Devices on registers in the branches the user works in (all, for company-wide roles). */
+  async list(tx: Tx, user: TenantUser) {
+    const branches = await this.ctx.branchIds(tx, user);
     return tx.query(
       `SELECT d.id, d.name, d.platform, d.app_version, d.status, d.license_issued_at, d.license_expires_at, d.last_seen_at, d.last_sync_at,
               d.created_at, d.revoked_at, r.code AS register_code, r.name AS register_name, b.name AS branch_name,
@@ -101,13 +103,19 @@ export class PosDevicesService {
               (SELECT count(*)::int FROM pos_sync_events e WHERE e.device_id = d.id AND e.status IN ('REJECTED', 'CONFLICT')) AS refused_events
          FROM pos_devices d JOIN pos_registers r ON r.id = d.register_id JOIN branches b ON b.id = r.branch_id
          LEFT JOIN users a ON a.id = d.activated_by LEFT JOIN users rv ON rv.id = d.revoked_by
+        WHERE ($1::uuid[] IS NULL OR r.branch_id = ANY($1))
         ORDER BY d.status, d.created_at DESC`,
+      [branches],
     );
   }
 
   async revoke(tx: Tx, user: TenantUser, id: string) {
-    const d = await tx.maybeOne(`SELECT * FROM pos_devices WHERE id = $1 FOR UPDATE`, [id]);
+    const d = await tx.maybeOne(
+      `SELECT d.*, r.branch_id FROM pos_devices d JOIN pos_registers r ON r.id = d.register_id WHERE d.id = $1 FOR UPDATE OF d`,
+      [id],
+    );
     if (!d) throw notFound('Device');
+    await this.ctx.assertBranch(tx, user, d.branch_id);
     if (d.status === 'REVOKED') return d;
     const after = await tx.one(
       `UPDATE pos_devices SET status = 'REVOKED', revoked_by = $2, revoked_at = now(), license_expires_at = LEAST(license_expires_at, now())

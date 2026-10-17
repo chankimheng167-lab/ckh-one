@@ -127,7 +127,7 @@ the API; menus only hide what the API would refuse anyway.
 | 5 | Accounting integration and reconciliation | ✅ |
 | 6 | Windows desktop POS and hardware | ✅ (see limits) |
 | 7 | Offline sync and device licensing | ✅ (see limits) |
-| 8 | Security tests, documentation, deployment | |
+| 8 | Security tests, documentation, deployment | ✅ |
 
 ### Phase 1 — done
 - This audit and design.
@@ -307,3 +307,28 @@ the API; menus only hide what the API would refuse anyway.
     `node -e "const k=require('crypto').generateKeyPairSync('ed25519');console.log(Buffer.from(k.privateKey.export({type:'pkcs8',format:'pem'})).toString('base64'))"`
     then set `$env:POS_LICENSE_PRIVATE_KEY` on the API. Build the installer with
     `$env:CKH_LICENSE_PUBLIC_KEY` set to the output of `GET /api/v1/pos/license/public-key`.
+
+### Phase 8 — done
+- POS security tests (`apps/api/test/pos-security.e2e.spec.ts`): every POS route requires the `POS_SALES` licence and
+  a named permission (the licence verification key is the only public route); a cashier is refused 14 manager and
+  supervisor actions and nothing changes behind the refusals; a manager limited to some branches sees and revokes
+  only devices there; another company gets "not found" for our sales, receipts, payments, settlements, reviews,
+  returns, shifts and devices, and our device secret is unknown to it; malformed quantities, amounts, ids, discounts
+  and oversized carts are refused with nothing recorded; card numbers are refused in every reference field and none
+  is stored; a wrong supervisor PIN is refused and an approval records the approver; sensitive actions are audited
+  with the person who did them.
+- Fixes found while writing them: device and sync-result lists and device revocation now respect the user's branches;
+  a card number in a payment's provider transaction id is refused at checkout as it already was elsewhere.
+- CI: a `desktop-e2e` job builds the API, the web bundle and the app, seeds a database, and runs the Electron
+  end-to-end script under a virtual display, including offline selling with the API stopped and restarted. The
+  `windows-installer` job builds the unsigned NSIS installer.
+- Deployment: `docs/DEPLOYMENT.md` covers POS setup per company, the licence key, building and signing the
+  installer, activating tills, and PowerShell versions of every step; `apps/desktop/README.md` covers the app.
+- Still outstanding before a commercial launch (none of these can be done from this repository alone):
+  - Run the installer on real Windows tills with the receipt printers, drawers and scanners to be sold, and fix
+    what that shows. Nothing here has touched physical hardware.
+  - Buy a code-signing certificate and publish signed builds; exercise the update flow end to end.
+  - Have a Cambodian accountant confirm the VAT postings, receipt contents (including offline receipts) and the
+    Khmer and Chinese wording.
+  - Bank and KHQR payments are verified by hand; there is no integration with a bank or payment provider.
+  - Run a penetration test against a staging deployment.

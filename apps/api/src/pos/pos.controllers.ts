@@ -625,7 +625,7 @@ export class PosDevicesController {
   @Get('devices')
   @RequirePermissions(P.POS_DEVICES_MANAGE)
   list(@CurrentUser() user: TenantUser) {
-    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.devices.list(tx));
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.devices.list(tx, user));
   }
 
   @Post('devices/:id/revoke')
@@ -677,6 +677,6 @@ export class PosDevicesController {
       }),
       query,
     );
-    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.sync.events(tx, q));
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.sync.events(tx, user, q));
   }
 }

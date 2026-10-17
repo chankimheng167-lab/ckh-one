@@ -24,6 +24,7 @@
     "electron": "44.5.1",
     "electron-builder": "26.17.0",
     "jest": "^29.7.0",
+    "playwright-core": "1.49.1",
     "typescript": "^5.6.3"
   },
   "jest": {
@@ -31,6 +32,8 @@
     "transform": {
       "^.+\\.ts$": "@swc/jest"
     },
-    "testMatch": ["**/test/**/*.spec.ts"]
+    "testMatch": [
+      "**/test/**/*.spec.ts"
+    ]
   }
 }

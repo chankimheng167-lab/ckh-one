@@ -160,15 +160,16 @@ export class PosSyncService {
     );
   }
 
-  async events(tx: Tx, q: { deviceId?: string; status?: string; limit: number }) {
+  async events(tx: Tx, user: TenantUser, q: { deviceId?: string; status?: string; limit: number }) {
+    const branches = await this.ctx.branchIds(tx, user);
     return tx.query(
       `SELECT e.id, e.idempotency_key, e.status, e.client_created_at, e.received_at, e.result, e.resulting_sale_id,
               s.number AS sale_number, d.name AS device_name, u.full_name AS cashier_name
-         FROM pos_sync_events e JOIN pos_devices d ON d.id = e.device_id JOIN users u ON u.id = e.user_id
+         FROM pos_sync_events e JOIN pos_devices d ON d.id = e.device_id JOIN pos_registers r ON r.id = d.register_id JOIN users u ON u.id = e.user_id
          LEFT JOIN pos_sales s ON s.id = e.resulting_sale_id
-        WHERE ($1::uuid IS NULL OR e.device_id = $1) AND ($2::text IS NULL OR e.status = $2)
+        WHERE ($1::uuid IS NULL OR e.device_id = $1) AND ($2::text IS NULL OR e.status = $2) AND ($4::uuid[] IS NULL OR r.branch_id = ANY($4))
         ORDER BY e.received_at DESC LIMIT $3`,
-      [q.deviceId ?? null, q.status ?? null, q.limit],
+      [q.deviceId ?? null, q.status ?? null, q.limit, branches],
     );
   }
 }

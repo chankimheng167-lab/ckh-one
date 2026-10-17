@@ -249,7 +249,7 @@ export class PosSalesService {
       if (!m) throw new DomainError('PAYMENT_METHOD_INVALID', `Payment ${i + 1}: payment method is not available`, 422);
       if (offline && !m.allow_offline) throw new DomainError('OFFLINE_PAYMENT_NOT_ALLOWED', `${m.name} cannot be taken offline`, 422);
       if (m.requires_reference && !p.reference) throw new DomainError('REFERENCE_REQUIRED', `${m.name}: enter the reference`, 422);
-      if (p.reference && looksLikeCardNumber(p.reference)) {
+      if ((p.reference && looksLikeCardNumber(p.reference)) || (p.providerTransactionId && looksLikeCardNumber(p.providerTransactionId))) {
         throw new DomainError('CARD_NUMBER_NOT_ALLOWED', 'Do not enter card numbers. Enter the terminal approval code instead.', 422);
       }
       return { input: p, method: m };

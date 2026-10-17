@@ -6,7 +6,7 @@
  *
  *   CKH_API_URL=http://localhost:3001/api/v1 xvfb-run -a node e2e/run.js
  *
- * Needs `playwright` (any recent version) resolvable from this folder or PLAYWRIGHT_DIR.
+ * Uses the `playwright-core` dev dependency (or `playwright` from PLAYWRIGHT_DIR).
  * CKH_APP_EXE=release/linux-unpacked/ckhdesktop runs the packaged app instead
  * (it reads its settings from config.json, and prints to a real printer, so
  * the PDF step is skipped).
@@ -21,7 +21,7 @@ const { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } = requ
 const { createServer } = require('net');
 const { tmpdir } = require('os');
 const { join } = require('path');
-const { _electron: electron } = require(process.env.PLAYWRIGHT_DIR ? join(process.env.PLAYWRIGHT_DIR, 'node_modules/playwright') : 'playwright');
+const { _electron: electron } = require(process.env.PLAYWRIGHT_DIR ? join(process.env.PLAYWRIGHT_DIR, 'node_modules/playwright') : 'playwright-core');
 
 const API = process.env.CKH_API_URL ?? 'http://localhost:3001/api/v1';
 const results = [];
