@@ -29,7 +29,8 @@ describe('pricing', () => {
       ],
       'USD',
     );
-    expect(o.grandTotal).toBe('1.11');
+    // each line: 0.33 + 0.03 VAT = 0.36; total is the sum of printed lines
+    expect(o.grandTotal).toBe('1.08');
   });
 
   it('rejects bad input', () => {

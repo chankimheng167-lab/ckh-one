@@ -134,6 +134,7 @@ export const DEFAULT_ROLES: Record<string, { name: string; permissions: Permissi
       P.PRODUCTS_VIEW,
       P.INVENTORY_VIEW,
       P.SALES_ORDERS_VIEW_ALL,
+      P.SALES_ORDERS_CANCEL,
       P.SALES_FULFILLMENT_RESERVE,
       P.SALES_FULFILLMENT_PICK_PACK,
       P.SALES_FULFILLMENT_DISPATCH,

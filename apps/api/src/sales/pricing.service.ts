@@ -84,7 +84,7 @@ export class PricingService {
       factor = new Decimal(u.factor);
     }
 
-    let price: Decimal | null = null;
+    let listed: Decimal | null = null;
     let source: ResolvedPrice['priceSource'] = 'LIST_PRICE';
     if (ctx.priceListId) {
       const row = await tx.maybeOne<{ unit_price: string; unit_id: string | null }>(
@@ -100,11 +100,11 @@ export class PricingService {
       );
       if (row) {
         // A base-unit price row applies to other units by the conversion factor.
-        price = row.unit_id ? new Decimal(row.unit_price) : new Decimal(row.unit_price).mul(factor);
+        listed = row.unit_id ? new Decimal(row.unit_price) : new Decimal(row.unit_price).mul(factor);
         source = 'PRICE_LIST';
       }
     }
-    if (price === null) price = new Decimal(p.list_price).mul(factor);
+    let price: Decimal = listed ?? new Decimal(p.list_price).mul(factor);
 
     let promotionId: string | null = null;
     const promos = await tx.query<{ id: string; promo_type: string; value: string }>(
@@ -116,7 +116,7 @@ export class PricingService {
       [on, quantity, productId, p.category_id, ctx.customerGroupId],
     );
     for (const promo of promos) {
-      const candidate =
+      const candidate: Decimal =
         promo.promo_type === 'PERCENT_OFF'
           ? price.mul(new Decimal(100).minus(promo.value)).div(100)
           : new Decimal(promo.value).mul(factor);
