@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
 import { MODULES, P } from '@ckh/shared';
 import { z } from 'zod';
 import { CurrentUser, has, RequireModules, RequirePermissions, TenantUser } from '../common/auth-context';
@@ -18,6 +18,9 @@ import { DailyQuery, PosReportsService } from './pos-reports.service';
 import { PosReturnsService, ReturnInput, ReturnsQuery } from './pos-returns.service';
 import { PendingQuery, PosPaymentsService, ReviewInput, SettleInput, VerifyInput } from './pos-payments.service';
 import { PosReconciliationService, ReconciliationQuery } from './pos-reconciliation.service';
+import { ActivateInput, HeartbeatInput, PosDevicesService } from './pos-devices.service';
+import { PosLicenseService } from './pos-license.service';
+import { PosSyncService, SyncInput } from './pos-sync.service';
 
 interface Response { setHeader(name: string, value: string): void; end(body: string | Buffer): void }
 
@@ -597,5 +600,82 @@ export class PosPaymentsController {
   reconcile(@CurrentUser() user: TenantUser, @Query() query: unknown) {
     const q = parse(ReconciliationQuery, query);
     return this.db.withTenant(user.tenantId, user.userId, (tx) => this.reconciliation.reconcile(tx, user, q));
+  }
+}
+
+/** Windows POS devices, offline licences and offline sale upload. */
+@RequireModules(MODULES.POS_SALES)
+@Controller('pos')
+export class PosDevicesController {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly devices: PosDevicesService,
+    private readonly sync: PosSyncService,
+    private readonly licenses: PosLicenseService,
+  ) {}
+
+  /** A manager, signed in on the new computer, activates it for a register. The secret is returned once. */
+  @Post('devices/activate')
+  @RequirePermissions(P.POS_DEVICES_MANAGE)
+  activate(@CurrentUser() user: TenantUser, @Body() body: unknown) {
+    const i = parse(ActivateInput, body);
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.devices.activate(tx, user, i));
+  }
+
+  @Get('devices')
+  @RequirePermissions(P.POS_DEVICES_MANAGE)
+  list(@CurrentUser() user: TenantUser) {
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.devices.list(tx));
+  }
+
+  @Post('devices/:id/revoke')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_DEVICES_MANAGE)
+  revoke(@CurrentUser() user: TenantUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.devices.revoke(tx, user, id));
+  }
+
+  /** The device checks in: proves it is still active and gets a fresh offline licence. */
+  @Post('devices/heartbeat')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_ACCESS)
+  heartbeat(@CurrentUser() user: TenantUser, @Headers('x-pos-device') device: string | undefined, @Body() body: unknown) {
+    const i = parse(HeartbeatInput, body ?? {});
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => this.devices.heartbeat(tx, user, await this.devices.authenticate(tx, device), i));
+  }
+
+  @Get('license/public-key')
+  @RequirePermissions(P.POS_ACCESS)
+  publicKey() {
+    return { algorithm: 'Ed25519', publicKey: this.licenses.publicKeyPem() };
+  }
+
+  /** Catalogue, prices and offline payment methods for the device's register. */
+  @Get('sync/bootstrap')
+  @RequirePermissions(P.POS_SALES_CREATE)
+  bootstrap(@CurrentUser() user: TenantUser, @Headers('x-pos-device') device: string | undefined) {
+    return this.db.withTenant(user.tenantId, user.userId, async (tx) => this.sync.bootstrap(tx, user, await this.devices.authenticate(tx, device)));
+  }
+
+  /** Upload of sales recorded offline. Each is replayed in its own transaction. */
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(P.POS_SALES_CREATE)
+  push(@CurrentUser() user: TenantUser, @Headers('x-pos-device') device: string | undefined, @Body() body: unknown) {
+    return this.sync.push(user, device, parse(SyncInput, body));
+  }
+
+  @Get('sync/events')
+  @RequirePermissions(P.POS_DEVICES_MANAGE)
+  events(@CurrentUser() user: TenantUser, @Query() query: unknown) {
+    const q = parse(
+      z.object({
+        deviceId: uuid.optional(),
+        status: z.enum(['ACCEPTED', 'ACCEPTED_WITH_CHANGES', 'REJECTED', 'CONFLICT']).optional(),
+        limit: z.coerce.number().int().min(1).max(500).default(100),
+      }),
+      query,
+    );
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.sync.events(tx, q));
   }
 }

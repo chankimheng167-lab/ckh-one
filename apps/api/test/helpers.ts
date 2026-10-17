@@ -37,13 +37,14 @@ export const ownerUrl = () => urls().ownerUrl;
 
 export class Api {
   constructor(private readonly app: INestApplication, public token?: string) {}
-  private req(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown) {
+  private req(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, headers: Record<string, string> = {}) {
     let r = request(this.app.getHttpServer())[method](`/api/v1${path}`);
     if (this.token) r = r.set('Authorization', `Bearer ${this.token}`);
+    for (const [k, v] of Object.entries(headers)) r = r.set(k, v);
     return body === undefined ? r : r.send(body as object);
   }
-  get = (p: string) => this.req('get', p);
-  post = (p: string, b?: unknown) => this.req('post', p, b ?? {});
+  get = (p: string, h?: Record<string, string>) => this.req('get', p, undefined, h);
+  post = (p: string, b?: unknown, h?: Record<string, string>) => this.req('post', p, b ?? {}, h);
   put = (p: string, b?: unknown) => this.req('put', p, b ?? {});
   del = (p: string) => this.req('delete', p);
   as = (token: string) => new Api(this.app, token);
