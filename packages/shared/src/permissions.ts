@@ -52,6 +52,8 @@ export const P = {
   SALES_TEAMS_MANAGE: 'sales.teams.manage',
   SALES_REPORTS_VIEW: 'sales.reports.view',
   SALES_SETTINGS_MANAGE: 'sales.settings.manage',
+  // HR & Payroll hand-off
+  HR_PAYROLL_MANAGE: 'hr.payroll.manage',
 } as const;
 
 export type PermissionCode = (typeof P)[keyof typeof P];

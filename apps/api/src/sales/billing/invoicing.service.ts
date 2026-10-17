@@ -5,6 +5,7 @@ import { conflict, notFound } from '../../common/errors';
 import type { Tx } from '../../db/database.service';
 import { JournalService } from '../../accounting/journal.service';
 import { NumberingService } from '../../core/numbering.service';
+import { CommissionsService } from '../commissions/commissions.service';
 import { OrdersService } from '../orders/orders.service';
 import { SalesContextService } from '../sales-context.service';
 
@@ -55,6 +56,7 @@ export class InvoicingService {
     private readonly journal: JournalService,
     private readonly numbering: NumberingService,
     private readonly audit: AuditService,
+    private readonly commissions: CommissionsService,
   ) {}
 
   async invoiceOrder(tx: Tx, actorUserId: string | null, orderId: string, opts: { invoiceDate?: string; notes?: string } = {}) {
@@ -117,6 +119,7 @@ export class InvoicingService {
     await tx.query('UPDATE invoices SET journal_entry_id = $2 WHERE id = $1', [inv.id, je]);
     await this.orders.history(tx, orderId, order.status, order.status, 'INVOICE_ISSUED', actorUserId, `Invoice ${number} for ${sum('total').toFixed(2)} ${order.currency}`);
     await this.audit.record(tx, { actorType: actorUserId ? 'USER' : 'SYSTEM', action: 'INVOICE_ISSUED', entityType: 'invoice', entityId: inv.id, after: { number, orderId, grandTotal: sum('total').toFixed(2) } });
+    await this.commissions.onInvoice(tx, inv.id);
     await this.syncInvoicedStatus(tx, orderId, actorUserId);
     return this.invoice(tx, inv.id);
   }
@@ -228,6 +231,7 @@ export class InvoicingService {
       ],
     });
     await tx.query('UPDATE credit_notes SET journal_entry_id = $2 WHERE id = $1', [cn.id, je]);
+    await this.commissions.onCreditNote(tx, cn.id);
     await this.audit.record(tx, { action: 'CREDIT_NOTE_ISSUED', entityType: 'credit_note', entityId: cn.id, after: { number, total: total.toFixed(2), returnId } });
     await this.autoCloseSettledOrders(tx, open.map((i) => i.id), actorUserId);
     return cn.id;

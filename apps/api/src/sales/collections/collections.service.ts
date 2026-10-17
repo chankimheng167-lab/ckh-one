@@ -7,6 +7,7 @@ import type { Tx } from '../../db/database.service';
 import { JournalService } from '../../accounting/journal.service';
 import { NumberingService } from '../../core/numbering.service';
 import { InvoicingService } from '../billing/invoicing.service';
+import { CommissionsService } from '../commissions/commissions.service';
 import { SalesContextService } from '../sales-context.service';
 
 const D = (v: Decimal.Value) => new Decimal(v);
@@ -38,6 +39,7 @@ export class CollectionsService {
     private readonly invoicing: InvoicingService,
     private readonly numbering: NumberingService,
     private readonly audit: AuditService,
+    private readonly commissions: CommissionsService,
   ) {}
 
   async submit(tx: Tx, user: TenantUser, input: CollectionInput, opts: { viaSync?: boolean } = {}) {
@@ -127,6 +129,7 @@ export class CollectionsService {
               notes = COALESCE(notes || E'\\n', '') || COALESCE($4, '') WHERE id = $1`,
       [id, user.userId, rc.id, input.comment ?? null],
     );
+    await this.commissions.onReceipt(tx, rc.id);
     await this.audit.record(tx, { action: 'COLLECTION_VERIFIED', entityType: 'sales_collection', entityId: id, after: { receipt: number, allocated: D(c.amount).minus(left).toFixed(2), unallocated: left.toFixed(2) } });
     await this.invoicing.autoCloseSettledOrders(tx, touched, user.userId);
     return this.get(tx, user, id);

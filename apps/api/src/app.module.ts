@@ -28,6 +28,20 @@ import { OrdersService } from './sales/orders/orders.service';
 import { PricingService } from './sales/pricing.service';
 import { SalesContextService } from './sales/sales-context.service';
 import { CatalogController, OrdersController, SalesCustomersController } from './sales/sales.controllers';
+import { CommissionsService } from './sales/commissions/commissions.service';
+import {
+  CommissionsController,
+  LocationsController,
+  PayrollHandoffController,
+  QuotationsController,
+  TargetsController,
+  TerritoriesController,
+  VisitsController,
+} from './sales/field.controllers';
+import { QuotationsService } from './sales/quotations/quotations.service';
+import { TargetsService } from './sales/targets/targets.service';
+import { TerritoriesService } from './sales/territories/territories.service';
+import { VisitsService } from './sales/visits/visits.service';
 
 @Global()
 @Module({
@@ -60,6 +74,13 @@ export class CoreInfraModule {}
     DeliveriesController,
     ReturnsController,
     CollectionsController,
+    QuotationsController,
+    VisitsController,
+    TerritoriesController,
+    LocationsController,
+    TargetsController,
+    CommissionsController,
+    PayrollHandoffController,
     AccountingController,
   ],
   providers: [
@@ -73,6 +94,11 @@ export class CoreInfraModule {}
     FulfilmentService,
     ReturnsService,
     CollectionsService,
+    CommissionsService,
+    TargetsService,
+    VisitsService,
+    TerritoriesService,
+    QuotationsService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

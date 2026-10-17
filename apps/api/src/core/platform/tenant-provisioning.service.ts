@@ -79,7 +79,7 @@ export class TenantProvisioningService {
          ($1, 'INVOICE', 'INV-{YYYY}-'), ($1, 'RECEIPT', 'RC-{YYYY}-'),
          ($1, 'CREDIT_NOTE', 'CN-{YYYY}-'), ($1, 'COLLECTION', 'COL-{YYYY}-'),
          ($1, 'JOURNAL', 'JV-{YYYY}-'), ($1, 'DELIVERY', 'DN-{YYYY}-'),
-         ($1, 'SALES_RETURN', 'RMA-{YYYY}-')`,
+         ($1, 'SALES_RETURN', 'RMA-{YYYY}-'), ($1, 'PAYROLL_BATCH', 'PCB-{YYYY}-')`,
       [tenantId],
     );
     await tx.query(

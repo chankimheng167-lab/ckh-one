@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Pool, PoolClient, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResultRow, types } from 'pg';
 import { loadConfig } from '../config';
 
 /** A client bound to one transaction with tenant context already set. */
@@ -12,6 +12,10 @@ export interface Tx {
 }
 
 export class NotFoundRowError extends Error {}
+
+// DATE columns stay 'YYYY-MM-DD' strings: converting them to JS Dates would
+// shift them by the server's time zone.
+types.setTypeParser(1082, (v: string) => v);
 
 function wrap(client: PoolClient, tenantId: string | null, userId: string | null): Tx {
   return {

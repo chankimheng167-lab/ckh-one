@@ -21,11 +21,12 @@ import type { Tx } from '../../db/database.service';
 import { NumberingService } from '../../core/numbering.service';
 import { CustomerPricingContext, PricingService } from '../pricing.service';
 import { SalesContextService, SalesRep, SalesSettings } from '../sales-context.service';
+import { VisitsService } from '../visits/visits.service';
 import type { CreateOrderInput, UpdateOrderInput } from './order.schemas';
 
 type LineInput = CreateOrderInput['lines'][number];
 
-interface BuiltLine {
+export interface BuiltLine {
   productId: string;
   unitId: string;
   unitFactor: string;
@@ -47,7 +48,7 @@ interface BuiltLine {
   productName: string;
 }
 
-interface BuiltOrder {
+export interface BuiltOrder {
   lines: BuiltLine[];
   currency: string;
   priceListId: string | null;
@@ -70,13 +71,14 @@ export class OrdersService {
     private readonly pricing: PricingService,
     private readonly numbering: NumberingService,
     private readonly audit: AuditService,
+    private readonly visits: VisitsService,
   ) {}
 
   // -------------------------------------------------------------------------
   // Create / update drafts
   // -------------------------------------------------------------------------
 
-  async create(tx: Tx, user: TenantUser, input: CreateOrderInput, opts: { provisional?: boolean; source?: string } = {}) {
+  async create(tx: Tx, user: TenantUser, input: CreateOrderInput, opts: { provisional?: boolean; source?: string; quotationId?: string } = {}) {
     if (input.clientReference) {
       const existing = await tx.maybeOne<{ id: string; created_by: string }>(
         'SELECT id, created_by FROM sales_orders WHERE client_reference = $1',
@@ -91,6 +93,7 @@ export class OrdersService {
     const settings = await this.ctx.settings(tx);
     const rep = await this.resolveRep(tx, user, input.salesRepId);
     await this.ctx.assertCustomerAccess(tx, user, input.customerId);
+    if (input.visitId) await this.visits.assertVisitForDocument(tx, input.visitId, rep.id, input.customerId);
     const header = await this.resolveHeader(tx, user, rep, input);
     const pricingCtx = await this.pricing.customerContext(tx, input.customerId);
     const built = await this.buildLines(tx, pricingCtx, input.lines, header.orderDate, settings);
@@ -100,15 +103,15 @@ export class OrdersService {
       `INSERT INTO sales_orders (tenant_id, number, customer_id, sales_rep_id, branch_id, warehouse_id, order_date,
           requested_delivery_date, status, currency, price_list_id, delivery_address_id, payment_terms_days, notes,
           subtotal, discount_total, tax_total, grand_total, max_discount_percent, source, is_provisional,
-          visit_id, client_reference, created_by)
-       VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          visit_id, client_reference, created_by, quotation_id)
+       VALUES (current_tenant_id(), $1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
        RETURNING id`,
       [
         number, input.customerId, rep.id, header.branchId, header.warehouseId, header.orderDate,
         input.requestedDeliveryDate ?? null, built.currency, built.priceListId, header.deliveryAddressId,
         header.paymentTermsDays, input.notes ?? null, built.subtotal, built.discountTotal, built.taxTotal,
-        built.grandTotal, built.maxEffectiveDiscountPercent, opts.source ?? input.source, opts.provisional ?? false,
-        input.visitId ?? null, input.clientReference ?? null, user.userId,
+        built.grandTotal, built.maxEffectiveDiscountPercent, opts.source ?? (input.visitId ? 'VISIT' : input.source), opts.provisional ?? false,
+        input.visitId ?? null, input.clientReference ?? null, user.userId, opts.quotationId ?? null,
       ],
     );
     await this.insertLines(tx, order.id, built.lines);
@@ -529,7 +532,7 @@ export class OrdersService {
   // Internals
   // -------------------------------------------------------------------------
 
-  private async resolveRep(tx: Tx, user: TenantUser, salesRepId?: string): Promise<SalesRep> {
+  async resolveRep(tx: Tx, user: TenantUser, salesRepId?: string): Promise<SalesRep> {
     const own = await this.ctx.repForUser(tx, user.userId);
     if (!salesRepId || salesRepId === own?.id) {
       if (!own || own.status !== 'ACTIVE') throw new DomainError('NOT_A_SALES_REP', 'Your account is not an active sales representative; choose a rep for this order', 422);
@@ -544,7 +547,7 @@ export class OrdersService {
     return rep;
   }
 
-  private async resolveHeader(
+  async resolveHeader(
     tx: Tx,
     user: TenantUser,
     rep: SalesRep,
@@ -580,7 +583,7 @@ export class OrdersService {
     return { branchId, warehouseId, deliveryAddressId, paymentTermsDays, orderDate };
   }
 
-  private async buildLines(tx: Tx, pctx: CustomerPricingContext, inputs: LineInput[], on: string, settings: SalesSettings): Promise<BuiltOrder> {
+  async buildLines(tx: Tx, pctx: CustomerPricingContext, inputs: LineInput[], on: string, settings: SalesSettings): Promise<BuiltOrder> {
     const resolved = [];
     for (const l of inputs) {
       const r = await this.pricing.resolve(tx, pctx, l.productId, l.unitId ?? null, l.quantity, on);
