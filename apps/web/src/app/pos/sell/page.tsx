@@ -916,10 +916,12 @@ function Done({ result, onNext }: { result: any; onNext: () => void }) {
   const [printed, setPrinted] = useState(false);
   const [askPin, setAskPin] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
-  async function print(approval?: { userId: string; pin: string }) {
+  // The drawer opens with the original receipt of a sale that took cash (Windows POS app with a drawer).
+  const tookCash = s.payments?.some((p: any) => p.kind === 'CASH');
+  async function print(approval?: { userId: string; pin: string }, openDrawer = false) {
     setPrintError(null);
     try {
-      await printReceipt({ saleId: s.id, approval });
+      await printReceipt({ saleId: s.id, approval, openDrawer });
       setPrinted(true);
     } catch (e) {
       const err = e as ApiError;
@@ -932,7 +934,7 @@ function Done({ result, onNext }: { result: any; onNext: () => void }) {
   useEffect(() => {
     if (auto.current || result.replayed || hw.autoPrint === false) return;
     auto.current = true;
-    void print();
+    void print(undefined, tookCash && hw.openDrawerOnCash !== false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Enter' && !askPin && onNext();

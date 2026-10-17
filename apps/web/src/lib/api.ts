@@ -1,5 +1,7 @@
 /** Thin client for the CKH ONE API. Every price and total shown after a save comes from the server. */
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '');
+// The Windows POS app sets the API address at install time and passes it in through its preload.
+const desktopApi = typeof window !== 'undefined' ? ((window as any).ckhPos?.apiUrl as string | undefined) : undefined;
+export const API_URL = (desktopApi || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1').replace(/\/$/, '');
 const TOKEN_KEY = 'ckh.session';
 const PLATFORM_TOKEN_KEY = 'ckh.platformSession';
 const DEVICE_KEY = 'ckh.deviceId';

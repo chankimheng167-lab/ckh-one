@@ -125,7 +125,7 @@ the API; menus only hide what the API would refuse anyway.
 | 3 | Touchscreen POS screen and payment workflow | ✅ |
 | 4 | Receipts, returns/refunds, shifts, reports | ✅ |
 | 5 | Accounting integration and reconciliation | ✅ |
-| 6 | Windows desktop POS and hardware | |
+| 6 | Windows desktop POS and hardware | ✅ (see limits) |
 | 7 | Offline sync and device licensing | |
 | 8 | Security tests, documentation, deployment | |
 
@@ -226,6 +226,36 @@ the API; menus only hide what the API would refuse anyway.
 - 7 end-to-end tests in `apps/api/test/pos-payments.e2e.spec.ts` (including tampering detection); API suite 148/148.
 - Browser run-through: KHQR sale (cashier gets no Verify button), supervisor rejects it from the list, cashier takes
   the balance in cash with change, manager sees a clean reconciliation. All steps passed.
-- To confirm with the company's accountant: a rejected transfer is booked to *cash over and short* (6900) until the
-  customer pays. A company that prefers a receivable can map that account in POS settings to another account.
+- To confirm with the company's accountant: a rejected transfer is booked to *cash over and short* (6900, the same
+  account as drawer differences, set in POS settings) until the customer pays. Booking it to a separate receivable
+  instead would need its own setting; that is not built.
   KHQR/bank statements are checked by a person; there is no bank or Bakong API integration.
+
+### Phase 6 — done, with limits
+- `apps/desktop`: Electron app (see `apps/desktop/README.md`) that loads the bundled web build from `app://ckh`, with
+  context isolation, sandboxed pages, no Node in pages, CSP, refused navigation/new windows/webviews/permissions,
+  and IPC accepted only from the app's own page. The API address is fixed at build time (or by an administrator in
+  the computer's `config.json`), never from the page.
+- Printing: silent HTML printing to a Windows printer (58/80 mm, A4; any language), or ESC/POS text to a network
+  printer on port 9100 with paper cut; the drawer pulses with the original receipt of a cash sale (network ESC/POS),
+  or from Printer settings for users with `pos.cash.drawer`. A failed print shows "Receipt not printed".
+- Encrypted local store: AES-256-GCM, data key protected by Windows DPAPI (`safeStorage`); ready for phase 7.
+- Updates: electron-updater with SHA-512 check and same-publisher signature check on Windows; the cashier chooses
+  when to restart. Installer: NSIS (per-machine, desktop shortcut) via `electron-builder.config.js`; signing from
+  `CSC_LINK`/`CSC_KEY_PASSWORD`, publisher from `CKH_PUBLISHER_NAME`.
+- Printer settings page: per-register options (paper, automatic print, drawer on cash, scanner suffix) and, in the
+  Windows app, “This computer” (printer, IP/port, paper, drawer, test print, open drawer). Options the app does not
+  support (serial/COM printers, customer display, copies) were removed from the page.
+- Tests: 8 desktop unit tests; Playwright drives the real Electron app (development build and the packaged Linux
+  build, which has the same layout as the Windows one) under a virtual display against the API. Passed: bundled app
+  on `app://ckh`, only `window.ckhPos` exposed, sign-in, cash sale printed silently (to PDF in test mode),
+  ESC/POS receipt text + cut + drawer pulse received by a TCP listener standing in for the printer, printer-off
+  error shown, navigation and `window.open` refused, API address not changeable from the page.
+- CI gains desktop unit tests and a `windows-latest` job that builds the (unsigned) NSIS installer.
+- Not verified, stated plainly:
+  - No physical printer, cash drawer or scanner has been tested. Silent printing to a real Windows printer
+    (`webContents.print`) was not run; only printing to PDF was.
+  - The app has not been run on Windows here. The installer could not be built in this Linux container (NSIS needs
+    Wine); the Windows CI job is what builds it. It is unsigned until a code-signing certificate is provided, and the
+    update flow has not been exercised end to end.
+  - Raw ESC/POS over USB or serial (COM) is not supported; such printers must be used through their Windows driver.

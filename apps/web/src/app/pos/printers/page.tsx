@@ -5,6 +5,7 @@ import { PosShell, usePos } from '@/components/PosShell';
 import { Card, ErrorBox, Field, Loading, Page } from '@/components/ui';
 import { api } from '@/lib/api';
 import { useAction, useApi } from '@/lib/hooks';
+import { desktop } from '@/lib/receipt';
 
 export default function PrinterSettingsPage() {
   return (
@@ -34,7 +35,7 @@ function Printers() {
   const manage = can(P.POS_DEVICES_MANAGE) || can(P.POS_REGISTERS_MANAGE);
   async function save() {
     setSaved(false);
-    const hardware = { ...f, copies: Number(f.copies), drawerPin: Number(f.drawerPin), printerName: f.printerName || null, printerAddress: f.printerAddress || null };
+    const hardware = { receiptPaper: f.receiptPaper, autoPrint: f.autoPrint, openDrawerOnCash: f.openDrawerOnCash, scannerSuffix: f.scannerSuffix };
     if (await act.run(() => api.put(`/pos/admin/registers/${rid}`, { hardware }))) { setSaved(true); regs.reload(); }
   }
   return (
@@ -55,19 +56,6 @@ function Printers() {
                 <option value="58">58 mm thermal</option><option value="80">80 mm thermal</option><option value="A4">A4</option>
               </select>
             </Field>
-            <Field label="Copies"><input inputMode="numeric" value={f.copies} onChange={(e) => setF({ ...f, copies: e.target.value })} /></Field>
-            <Field label="Printer connection (Windows app)">
-              <select value={f.printerConnection} onChange={(e) => setF({ ...f, printerConnection: e.target.value })}>
-                <option value="SYSTEM">Windows printer queue</option><option value="NETWORK">Network ESC/POS (IP:port)</option><option value="SERIAL">Serial/USB ESC/POS (COM port)</option>
-              </select>
-            </Field>
-            <Field label={f.printerConnection === 'SYSTEM' ? 'Windows printer name' : 'Printer name (label)'}><input value={f.printerName ?? ''} onChange={(e) => setF({ ...f, printerName: e.target.value })} /></Field>
-            {f.printerConnection !== 'SYSTEM' && (
-              <Field label={f.printerConnection === 'NETWORK' ? 'Address (192.168.1.50:9100)' : 'Port (COM3)'}><input value={f.printerAddress ?? ''} onChange={(e) => setF({ ...f, printerAddress: e.target.value })} /></Field>
-            )}
-            <Field label="Cash drawer pin">
-              <select value={f.drawerPin} onChange={(e) => setF({ ...f, drawerPin: e.target.value })}><option value={0}>Pin 2 (most drawers)</option><option value={1}>Pin 5</option></select>
-            </Field>
             <Field label="Scanner sends after the code">
               <select value={f.scannerSuffix} onChange={(e) => setF({ ...f, scannerSuffix: e.target.value })}><option value="ENTER">Enter</option><option value="TAB">Tab</option><option value="NONE">Nothing</option></select>
             </Field>
@@ -75,14 +63,77 @@ function Printers() {
           <div className="stack" style={{ marginTop: 10 }}>
             <label className="row small"><input type="checkbox" checked={f.autoPrint} onChange={(e) => setF({ ...f, autoPrint: e.target.checked })} /> Print the receipt automatically after each sale</label>
             <label className="row small"><input type="checkbox" checked={f.openDrawerOnCash} onChange={(e) => setF({ ...f, openDrawerOnCash: e.target.checked })} /> Open the cash drawer on cash sales (Windows app)</label>
-            <label className="row small"><input type="checkbox" checked={f.customerDisplay} onChange={(e) => setF({ ...f, customerDisplay: e.target.checked })} /> Customer display connected</label>
           </div>
-          <p className="small muted">In a browser, receipts print through the browser’s print dialog and the drawer cannot be opened. Direct printing and the drawer kick need the CKH ONE POS Windows app.</p>
+          <p className="small muted">In a browser, receipts print through the browser’s print dialog and the drawer cannot be opened. In the CKH ONE POS Windows app, the printer and drawer of each computer are set under “This computer” below.</p>
           <ErrorBox error={act.error} />
           {saved && <div className="notice ok">Saved.</div>}
           {manage && <button className="primary" disabled={act.busy} onClick={save}>Save</button>}
         </Card>
       )}
+      {desktop() && <ThisComputer canDrawer={can(P.POS_CASH_DRAWER)} />}
     </Page>
+  );
+}
+
+/** Printer and drawer of the computer running the Windows POS app (stored on that computer). */
+function ThisComputer({ canDrawer }: { canDrawer: boolean }) {
+  const d = desktop()!;
+  const [f, setF] = useState<any>(null);
+  const [printers, setPrinters] = useState<{ name: string; isDefault: boolean }[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const act = useAction();
+  useEffect(() => {
+    void d.printerSettings().then(setF);
+    void d.printers().then(setPrinters).catch(() => setPrinters([]));
+  }, [d]);
+  if (!f) return <Loading />;
+  const run = async (what: string, fn: () => Promise<any>) => {
+    setMsg(null);
+    const r = await act.run(fn);
+    if (r) setMsg(r.reason ?? what);
+  };
+  return (
+    <Card title={`This computer · CKH ONE POS ${d.version}`}>
+      <div className="form-grid">
+        <Field label="Receipt printer">
+          <select value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
+            <option value="system">Windows printer (any language)</option>
+            <option value="network">Network ESC/POS printer (English receipts)</option>
+            <option value="none">Do not print</option>
+          </select>
+        </Field>
+        {f.mode === 'system' && (
+          <Field label="Windows printer">
+            <select value={f.deviceName} onChange={(e) => setF({ ...f, deviceName: e.target.value })}>
+              <option value="">Default printer</option>
+              {printers.map((p) => <option key={p.name} value={p.name}>{p.name}{p.isDefault ? ' (default)' : ''}</option>)}
+            </select>
+          </Field>
+        )}
+        {f.mode === 'network' && (
+          <>
+            <Field label="Printer IP address"><input value={f.host} onChange={(e) => setF({ ...f, host: e.target.value.trim() })} placeholder="192.168.1.50" /></Field>
+            <Field label="Port"><input inputMode="numeric" value={f.port} onChange={(e) => setF({ ...f, port: Number(e.target.value) || 9100 })} /></Field>
+          </>
+        )}
+        <Field label="Paper">
+          <select value={f.paper} onChange={(e) => setF({ ...f, paper: e.target.value })}>
+            <option value="58">58 mm</option><option value="80">80 mm</option><option value="A4">A4</option>
+          </select>
+        </Field>
+        <Field label="Cash drawer pin">
+          <select value={f.drawerPin} onChange={(e) => setF({ ...f, drawerPin: Number(e.target.value) })}><option value={0}>Pin 2 (most drawers)</option><option value={1}>Pin 5</option></select>
+        </Field>
+      </div>
+      <label className="row small" style={{ marginTop: 10 }}><input type="checkbox" checked={f.drawer} onChange={(e) => setF({ ...f, drawer: e.target.checked })} /> A cash drawer is connected to the receipt printer</label>
+      {f.mode === 'system' && f.drawer && <p className="small muted">With a Windows printer, the drawer opens through the printer driver: turn on “open cash drawer” in the printer’s Windows settings.</p>}
+      <ErrorBox error={act.error} />
+      {msg && <div className="notice ok small">{msg}</div>}
+      <div className="row">
+        <button className="primary" disabled={act.busy} onClick={() => run('Saved on this computer.', () => d.savePrinterSettings(f).then(() => ({})))}>Save</button>
+        <button disabled={act.busy} onClick={() => run('Test page sent to the printer.', () => d.testPrint())}>Print a test page</button>
+        {canDrawer && <button disabled={act.busy} onClick={() => run('Drawer opened.', () => d.openDrawer())}>Open drawer</button>}
+      </div>
+    </Card>
   );
 }

@@ -55,3 +55,37 @@ jobs:
         run: |
           pnpm --filter @ckh/web typecheck
           pnpm --filter @ckh/web build
+      - name: Desktop app unit tests (ESC/POS, encrypted store, security rules)
+        run: |
+          pnpm --filter @ckh/desktop typecheck
+          pnpm --filter @ckh/desktop test
+
+  windows-installer:
+    # Builds the unsigned Windows installer to prove packaging works. Release
+    # builds must be signed (see apps/desktop/electron-builder.config.js).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ckh/shared build
+      - name: Build the web app for the desktop bundle
+        shell: pwsh
+        run: |
+          $env:NEXT_PUBLIC_API_URL = "https://api.example.com/api/v1"
+          pnpm --filter @ckh/web build
+      - name: Build the installer (unsigned)
+        shell: pwsh
+        run: |
+          $env:NEXT_PUBLIC_API_URL = "https://api.example.com/api/v1"
+          pnpm --filter @ckh/desktop dist:win
+          Get-ChildItem apps/desktop/release/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckh-one-pos-installer-unsigned
+          path: apps/desktop/release/*.exe
+          retention-days: 7
