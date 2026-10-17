@@ -286,8 +286,8 @@ CREATE TABLE pos_sales (
   client_created_at     timestamptz,
   review_status         text NOT NULL DEFAULT 'NONE' CHECK (review_status IN ('NONE', 'NEEDS_REVIEW', 'REVIEWED')),
   review_reasons        jsonb,
+  -- One ledger entry per sale: payments, revenue, discounts, VAT, COGS.
   journal_entry_id      uuid,
-  cogs_journal_entry_id uuid,
   created_at            timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, number),
   UNIQUE (tenant_id, id),
@@ -302,8 +302,7 @@ CREATE TABLE pos_sales (
   FOREIGN KEY (tenant_id, customer_id) REFERENCES customers (tenant_id, id),
   FOREIGN KEY (tenant_id, device_id) REFERENCES pos_devices (tenant_id, id),
   FOREIGN KEY (tenant_id, discount_approved_by) REFERENCES users (tenant_id, id),
-  FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id),
-  FOREIGN KEY (tenant_id, cogs_journal_entry_id) REFERENCES journal_entries (tenant_id, id)
+  FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id)
 );
 CREATE INDEX pos_sales_date_idx ON pos_sales (tenant_id, business_date, branch_id);
 CREATE INDEX pos_sales_shift_idx ON pos_sales (tenant_id, shift_id);
@@ -371,6 +370,8 @@ CREATE TABLE pos_sale_payments (
   tenant_id              uuid NOT NULL,
   sale_id                uuid NOT NULL,
   method_id              uuid NOT NULL,
+  -- Order the cashier entered the tenders in (receipts list them this way).
+  line_no                integer NOT NULL CHECK (line_no > 0),
   kind                   text NOT NULL CHECK (kind IN ('CASH', 'BANK_TRANSFER', 'QR', 'CARD', 'OTHER')),
   amount_tendered        numeric(18,2) NOT NULL CHECK (amount_tendered > 0),
   -- The part of the sale this payment settles (cash tendered minus change).

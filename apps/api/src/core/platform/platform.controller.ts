@@ -6,7 +6,7 @@ import { AuditService } from '../../common/audit.service';
 import { DomainError, notFound } from '../../common/errors';
 import { isValidTimeZone } from '../../common/business-time';
 import { newPassword, parse } from '../../common/validation';
-import { DatabaseService } from '../../db/database.service';
+import { DatabaseService, Tx } from '../../db/database.service';
 import { TenantProvisioningService, validateModuleSet } from './tenant-provisioning.service';
 
 const moduleCode = z.enum(Object.values(MODULES) as [ModuleCode, ...ModuleCode[]]);
@@ -37,6 +37,14 @@ const SetSubscription = z.object({
   status: z.enum(['TRIAL', 'ACTIVE', 'PAST_DUE', 'EXPIRED', 'CANCELLED']),
   endsAt: z.string().datetime().nullable(),
   graceDays: z.number().int().min(0).max(90).default(0),
+});
+
+const PosLicenseInput = z.object({
+  maxBranches: z.number().int().min(0).max(10000).nullable(),
+  maxRegisters: z.number().int().min(0).max(100000).nullable(),
+  maxDevices: z.number().int().min(0).max(100000).nullable(),
+  offlineValidityHours: z.number().int().min(1).max(720),
+  notes: z.string().max(500).nullable().optional(),
 });
 
 /** Super Admin portal API (platform owner). */
@@ -161,6 +169,69 @@ export class PlatformController {
       await this.audit.record(tx, { actorType: 'PLATFORM_ADMIN', tenantId, action: 'TENANT_STATUS_CHANGED', entityType: 'tenant', entityId: tenantId, after: { status } });
       return r;
     });
+  }
+
+  /** POS licence limits for a company (POS_SALES itself is switched on with the modules endpoint). */
+  @Get('tenants/:tenantId/pos-license')
+  posLicense(@Param('tenantId', ParseUUIDPipe) tenantId: string) {
+    return this.db.withPlatform(null, async (tx) => {
+      const t = await tx.maybeOne('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+      if (!t) throw notFound('Tenant');
+      const lic = await tx.maybeOne('SELECT * FROM pos_licenses WHERE tenant_id = $1', [tenantId]);
+      const usage = await this.posUsageRow(tx, tenantId);
+      const module = await tx.maybeOne(`SELECT enabled, ends_at FROM tenant_modules WHERE tenant_id = $1 AND module_code = 'POS_SALES'`, [tenantId]);
+      return { tenantId, enabled: !!module?.enabled, moduleEndsAt: module?.ends_at ?? null, license: lic, usage };
+    });
+  }
+
+  @Put('tenants/:tenantId/pos-license')
+  setPosLicense(@Param('tenantId', ParseUUIDPipe) tenantId: string, @Body() body: unknown, @CurrentAdmin() admin: PlatformAdmin) {
+    const i = parse(PosLicenseInput, body);
+    return this.db.withPlatform(admin.adminId, async (tx) => {
+      const t = await tx.maybeOne('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+      if (!t) throw notFound('Tenant');
+      const before = await tx.maybeOne('SELECT * FROM pos_licenses WHERE tenant_id = $1', [tenantId]);
+      const after = await tx.one(
+        `INSERT INTO pos_licenses (tenant_id, max_branches, max_registers, max_devices, offline_validity_hours, notes, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+         ON CONFLICT (tenant_id) DO UPDATE SET max_branches = EXCLUDED.max_branches, max_registers = EXCLUDED.max_registers,
+           max_devices = EXCLUDED.max_devices, offline_validity_hours = EXCLUDED.offline_validity_hours, notes = EXCLUDED.notes,
+           updated_by = EXCLUDED.updated_by, updated_at = now()
+         RETURNING *`,
+        [tenantId, i.maxBranches, i.maxRegisters, i.maxDevices, i.offlineValidityHours, i.notes ?? null, admin.adminId],
+      );
+      await this.audit.record(tx, { actorType: 'PLATFORM_ADMIN', tenantId, action: 'POS_LICENSE_CHANGED', entityType: 'pos_license', entityId: tenantId, before, after });
+      return after;
+    });
+  }
+
+  /** POS usage across all companies: registers, devices, sales in the last 30 days, last sync. */
+  @Get('pos/usage')
+  posUsage() {
+    return this.db.withPlatform(null, async (tx) => {
+      const tenants = await tx.query<{ id: string; code: string; name: string; status: string }>(
+        `SELECT t.id, t.code, t.name, t.status FROM tenants t
+          WHERE EXISTS (SELECT 1 FROM tenant_modules m WHERE m.tenant_id = t.id AND m.module_code = 'POS_SALES' AND m.enabled)
+          ORDER BY t.name`,
+      );
+      const out = [];
+      for (const t of tenants) out.push({ ...t, ...(await this.posUsageRow(tx, t.id)), license: await tx.maybeOne('SELECT * FROM pos_licenses WHERE tenant_id = $1', [t.id]) });
+      return out;
+    });
+  }
+
+  private async posUsageRow(tx: Tx, tenantId: string) {
+    return tx.one(
+      `SELECT (SELECT count(*)::int FROM pos_registers WHERE tenant_id = $1 AND status = 'ACTIVE') AS registers,
+              (SELECT count(DISTINCT branch_id)::int FROM pos_registers WHERE tenant_id = $1 AND status = 'ACTIVE') AS branches,
+              (SELECT count(*)::int FROM pos_devices WHERE tenant_id = $1 AND status = 'ACTIVE') AS devices,
+              (SELECT count(*)::int FROM pos_sales WHERE tenant_id = $1 AND sold_at > now() - interval '30 days') AS sales_30d,
+              (SELECT COALESCE(sum(grand_total), 0) FROM pos_sales WHERE tenant_id = $1 AND sold_at > now() - interval '30 days') AS sales_total_30d,
+              (SELECT max(sold_at) FROM pos_sales WHERE tenant_id = $1) AS last_sale_at,
+              (SELECT max(last_sync_at) FROM pos_devices WHERE tenant_id = $1) AS last_device_sync_at,
+              (SELECT count(*)::int FROM pos_sync_events WHERE tenant_id = $1 AND status IN ('REJECTED', 'CONFLICT')) AS sync_problems`,
+      [tenantId],
+    );
   }
 
   /** Company settings the platform owns: business time zone and country. */

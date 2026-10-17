@@ -48,6 +48,13 @@ import { SyncService } from './sales/sync/sync.service';
 import { ThemeController } from './core/theme/theme.controller';
 import { ReportsController } from './sales/reports/reports.controller';
 import { ReportsService } from './sales/reports/reports.service';
+import { PosAdminController, PosController, PosShiftsController } from './pos/pos.controllers';
+import { PosAdminService } from './pos/pos-admin.service';
+import { PosCatalogService } from './pos/pos-catalog.service';
+import { PosContextService } from './pos/pos-context.service';
+import { PosHeldService } from './pos/pos-held.service';
+import { PosSalesService } from './pos/pos-sales.service';
+import { PosShiftsService } from './pos/pos-shifts.service';
 
 @Global()
 @Module({
@@ -91,6 +98,9 @@ export class CoreInfraModule {}
     ThemeController,
     ReportsController,
     AccountingController,
+    PosController,
+    PosShiftsController,
+    PosAdminController,
   ],
   providers: [
     SessionService,
@@ -111,6 +121,12 @@ export class CoreInfraModule {}
     QuotationsService,
     SyncService,
     ReportsService,
+    PosContextService,
+    PosCatalogService,
+    PosSalesService,
+    PosShiftsService,
+    PosHeldService,
+    PosAdminService,
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
