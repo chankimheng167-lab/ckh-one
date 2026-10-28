@@ -51,8 +51,9 @@ jobs:
           done
       - name: API end-to-end tests
         run: pnpm --filter @ckh/api test
-      - name: Type-check and build the web app
+      - name: Lint, type-check and build the web app
         run: |
+          pnpm --filter @ckh/web lint
           pnpm --filter @ckh/web typecheck
           pnpm --filter @ckh/web build
       - name: Desktop app unit tests (ESC/POS, encrypted store, security rules)

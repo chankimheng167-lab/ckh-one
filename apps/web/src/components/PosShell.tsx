@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { P } from '@ckh/shared';
 import { ErrorBox } from '@/components/ui';
@@ -51,7 +52,7 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
     return (
       <div className="pos-center">
         <div className="notice warn">POS Sales is not part of your company’s subscription. Ask your administrator or CKH ONE support to activate it.</div>
-        <a href="/">Back to CKH ONE</a>
+        <Link href="/">Back to CKH ONE</Link>
       </div>
     );
   }
@@ -59,7 +60,7 @@ export function PosShell({ children, needRegister = true, wide }: { children: Re
     return (
       <div className="pos-center">
         <div className="notice warn">Your account does not have access to the POS. Ask your administrator for a cashier role.</div>
-        <a href="/">Back to CKH ONE</a>
+        <Link href="/">Back to CKH ONE</Link>
       </div>
     );
   }
@@ -212,7 +213,7 @@ function RegisterPicker({ pos }: { pos: PosState }) {
           </button>
         ))}
       </div>
-      <a href="/">Back to CKH ONE</a>
+      <Link href="/">Back to CKH ONE</Link>
     </div>
   );
 }

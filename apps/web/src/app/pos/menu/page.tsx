@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { P } from '@ckh/shared';
 import { PosShell, usePos } from '@/components/PosShell';
 import { Page } from '@/components/ui';
@@ -35,7 +36,7 @@ function Menu() {
   const { can } = usePos();
   const show = ITEMS.filter((i) => (!i.perm || can(i.perm)) && (!i.any || i.any.some(can)));
   return (
-    <Page title="POS menu" actions={<a className="btn" href="/">Back to CKH ONE</a>}>
+    <Page title="POS menu" actions={<Link className="btn" href="/">Back to CKH ONE</Link>}>
       <div className="pos-tiles">
         {show.map((i) => (
           <a key={i.href} href={i.href} className="btn pos-tile" style={{ textDecoration: 'none' }}>

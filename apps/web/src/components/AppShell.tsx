@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { P } from '@ckh/shared';
 import { useSession } from '@/lib/session';
@@ -83,9 +84,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <div className="row">
           <button className="menu-btn link" aria-label="Menu" onClick={() => setOpen(!open)} style={{ fontSize: 22, color: 'var(--ckh-text)' }}>☰</button>
-          <a href="/" className="brand">
+          <Link href="/" className="brand">
             <span className="logo">C1</span> CKH ONE <span className="muted small" style={{ fontWeight: 400 }}>Sales</span>
-          </a>
+          </Link>
         </div>
         <div className="row small">
           {!s.online && <span className="badge warn">Offline</span>}
