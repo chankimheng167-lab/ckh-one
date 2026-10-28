@@ -57,6 +57,7 @@ export default function LoginPage() {
         <label className="field"><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
         {error && <div className="notice bad">{error}</div>}
         <button className="primary" disabled={busy} type="submit">{busy ? 'Signing in…' : 'Sign in'}</button>
+        <div className="small muted">Platform owner? <a href="/platform/">Super Admin sign-in</a></div>
       </form>
     </div>
   );

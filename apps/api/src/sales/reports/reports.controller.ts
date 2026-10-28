@@ -5,12 +5,13 @@ import { z } from 'zod';
 import { CurrentUser, RequireModules, RequirePermissions, TenantUser } from '../../common/auth-context';
 import { isoDate, parse, uuid } from '../../common/validation';
 import { DatabaseService } from '../../db/database.service';
+import { businessDate } from '../../common/business-time';
 import { SubscriptionService } from '../../core/subscriptions/subscription.service';
 import { reportToPdf, reportToXlsx } from './report-export';
 import { ReportsService } from './reports.service';
 
-const monthStart = () => `${new Date().toISOString().slice(0, 7)}-01`;
-const today = () => new Date().toISOString().slice(0, 10);
+const today = (u: TenantUser) => businessDate(u.timezone);
+const monthStart = (u: TenantUser) => `${today(u).slice(0, 7)}-01`;
 const Range = { from: isoDate.optional(), to: isoDate.optional() };
 const ReportQuery = z.object({
   ...Range,
@@ -36,7 +37,7 @@ export class ReportsController {
   @RequirePermissions(P.SALES_DASHBOARD_VIEW)
   team(@CurrentUser() user: TenantUser, @Query() query: unknown) {
     const q = parse(z.object({ ...Range, teamId: uuid.optional() }), query);
-    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.svc.teamPerformance(tx, user, { from: q.from ?? monthStart(), to: q.to ?? today(), teamId: q.teamId }));
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.svc.teamPerformance(tx, user, { from: q.from ?? monthStart(user), to: q.to ?? today(user), teamId: q.teamId }));
   }
 
   @Get('territory-map')
@@ -44,7 +45,7 @@ export class ReportsController {
   @RequirePermissions(P.SALES_DASHBOARD_VIEW)
   map(@CurrentUser() user: TenantUser, @Query() query: unknown) {
     const q = parse(z.object({ ...Range, includeVisits: z.coerce.boolean().default(false) }), query);
-    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.svc.territoryMap(tx, user, { from: q.from ?? monthStart(), to: q.to ?? today(), includeVisits: q.includeVisits }));
+    return this.db.withTenant(user.tenantId, user.userId, (tx) => this.svc.territoryMap(tx, user, { from: q.from ?? monthStart(user), to: q.to ?? today(user), includeVisits: q.includeVisits }));
   }
 
   @Get('reports')
@@ -59,7 +60,7 @@ export class ReportsController {
   async report(@CurrentUser() user: TenantUser, @Param('code') code: string, @Query() query: unknown, @Res({ passthrough: true }) res: Response) {
     const { format, ...q } = parse(ReportQuery, query);
     const report = await this.db.withTenant(user.tenantId, user.userId, (tx) =>
-      this.svc.run(tx, user, code, { ...q, from: q.from ?? monthStart(), to: q.to ?? today() }),
+      this.svc.run(tx, user, code, { ...q, from: q.from ?? monthStart(user), to: q.to ?? today(user) }),
     );
     if (format === 'json') return report;
     const name = `${code}_${report.filters.from}_${report.filters.to}`;

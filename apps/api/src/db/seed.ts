@@ -2,6 +2,8 @@ import * as bcrypt from 'bcryptjs';
 import { Client } from 'pg';
 import { MODULE_CATALOG } from '@ckh/shared';
 import type { Tx } from './database.service';
+import { businessDate, DEFAULT_TIMEZONE } from '../common/business-time';
+import { PUBLIC_DEMO_PASSWORD } from '../config';
 import { TenantProvisioningService } from '../core/platform/tenant-provisioning.service';
 
 /** Run fn in a platform-admin transaction on a raw connection (seeding / tests). */
@@ -14,6 +16,8 @@ export async function platformTx<T>(connectionString: string, fn: (tx: Tx) => Pr
     const tx: Tx = {
       tenantId: null,
       userId: null,
+      timezone: DEFAULT_TIMEZONE,
+      today: () => businessDate(DEFAULT_TIMEZONE),
       query: async (sql, params) => (await client.query(sql, params as any[])).rows,
       one: async (sql, params) => {
         const r = await client.query(sql, params as any[]);
@@ -62,19 +66,19 @@ export async function seedPlatform(tx: Tx, admin: { email: string; password: str
 }
 
 /** A demo company with a sales team, customers, products and stock. */
-export async function seedDemoTenant(tx: Tx) {
+export async function seedDemoTenant(tx: Tx, password: string = PUBLIC_DEMO_PASSWORD) {
   const exists = await tx.maybeOne(`SELECT 1 FROM tenants WHERE code = 'demo'`);
   if (exists) return;
   const { tenantId } = await new TenantProvisioningService().createTenant(tx, {
     code: 'demo',
     name: 'ABC Trading Co., Ltd.',
-    admin: { email: 'admin@demo.ckh.one', password: 'ChangeMe!2026', fullName: 'Demo Admin' },
+    admin: { email: 'admin@demo.ckh.one', password, fullName: 'Demo Admin' },
     modules: ['INVENTORY', 'ACCOUNTING', 'CRM', 'SALES_TEAM_BASIC', 'SALES_ORDER_MANAGEMENT', 'SALES_TERRITORY_MANAGEMENT', 'SALES_COMMISSION_MANAGEMENT', 'SALES_ADVANCED_ANALYTICS', 'SALES_OFFLINE_ORDERING'],
     subscription: { status: 'ACTIVE', endsAt: null },
   });
   await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
   const id = (sql: string, p: unknown[] = []) => tx.one<{ id: string }>(sql, p).then((r) => r.id);
-  const pw = await bcrypt.hash('ChangeMe!2026', 10);
+  const pw = await bcrypt.hash(password, 10);
   const role = (code: string) => id('SELECT id FROM roles WHERE code = $1', [code]);
   const user = async (email: string, name: string, roleCode: string) => {
     const uid = await id(`INSERT INTO users (tenant_id, email, password_hash, full_name) VALUES ($1, $2, $3, $4) RETURNING id`, [tenantId, email, pw, name]);

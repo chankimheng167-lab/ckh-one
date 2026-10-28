@@ -81,7 +81,7 @@ export class TargetsService {
 
   /** Targets visible to the user, with achievement. Reps see their own; supervisors their team; managers all. */
   async list(tx: Tx, user: TenantUser, q: { on?: string; salesRepId?: string; scope?: string; periodType?: string }) {
-    const on = q.on ?? new Date().toISOString().slice(0, 10);
+    const on = q.on ?? tx.today();
     const all = has(user, P.SALES_TARGETS_MANAGE) || has(user, P.SALES_ORDERS_VIEW_ALL);
     const rep = await this.ctx.repForUser(tx, user.userId);
     const teams = has(user, P.SALES_ORDERS_VIEW_TEAM) ? await this.ctx.managedTeamIds(tx, user.userId) : [];
@@ -111,7 +111,7 @@ export class TargetsService {
 
   async progress(tx: Tx, t: TargetRow) {
     const actual = await this.actual(tx, t);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = tx.today();
     const totalDays = daysBetween(t.period_start, t.period_end) + 1;
     const elapsed = Math.min(totalDays, Math.max(0, daysBetween(t.period_start, today) + 1));
     const achievement = new Decimal(actual).div(t.target_value).mul(100);

@@ -51,7 +51,7 @@ export class CatalogService {
     );
     if (q.customerId && rows.length) {
       const pctx = await this.pricing.customerContext(tx, q.customerId);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = tx.today();
       for (const r of rows) {
         const price = await this.pricing.resolve(tx, pctx, r.id, null, '1', today);
         Object.assign(r, { customer_price: price.unitPrice, price_source: price.priceSource, currency: pctx.currency, tax_rate_percent: price.taxRatePercent });
@@ -96,7 +96,7 @@ export class CatalogService {
     if (customerId) {
       await this.ctx.assertCustomerAccess(tx, user, customerId);
       const pctx = await this.pricing.customerContext(tx, customerId);
-      customerPrice = await this.pricing.resolve(tx, pctx, productId, null, '1', new Date().toISOString().slice(0, 10));
+      customerPrice = await this.pricing.resolve(tx, pctx, productId, null, '1', tx.today());
     }
     return { ...p, units, variants, stock, stockAsOf: new Date().toISOString(), promotions, customerPrice };
   }

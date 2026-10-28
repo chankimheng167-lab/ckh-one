@@ -17,3 +17,9 @@ export const paging = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+/** Password policy for new and changed passwords. */
+export const newPassword = z
+  .string()
+  .min(10, 'Use at least 10 characters')
+  .max(200)
+  .refine((p) => /[a-zA-Z]/.test(p) && /[0-9]/.test(p), 'Use letters and numbers');
