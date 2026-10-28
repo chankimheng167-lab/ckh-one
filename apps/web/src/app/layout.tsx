@@ -21,11 +21,13 @@ const apiOrigin = (() => {
 /**
  * Content-Security-Policy for the static app: scripts only from this origin
  * (Next.js needs inline bootstrap scripts), API calls only to the CKH ONE
- * API, no plugins, no foreign forms, no <base> hijacking.
+ * API, no plugins, no foreign forms, no <base> hijacking. `next dev` needs
+ * eval for hot reload, so 'unsafe-eval' is allowed in development only.
  */
+const devEval = process.env.NODE_ENV === 'development' ? " 'unsafe-eval'" : '';
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${devEval}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' https: data: blob:",
   "font-src 'self' data:",
