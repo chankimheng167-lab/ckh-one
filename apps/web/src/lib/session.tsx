@@ -78,7 +78,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const syncNow = useCallback(async () => {
     if (!me || !navigator.onLine) return;
     await flushOutbox(me.userId).catch(() => undefined);
-    if (me.modules.includes('SALES_OFFLINE_ORDERING')) {
+    if (me.modules.includes('SALES_OFFLINE_ORDERING') && me.permissions.includes('sales.catalog.view')) {
       setSnapshot(await refreshSnapshot(me.userId).catch(() => snapshot));
     }
     setQueue(await outboxCounts(me.userId));
@@ -152,7 +152,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setMe(m);
         const t = await api.get('/theme').catch(() => null);
         if (t) applyTheme(t.cssVariables);
-        if (m.modules.includes('SALES_OFFLINE_ORDERING')) setSnapshot(await refreshSnapshot(m.userId).catch(() => null));
+        if (m.modules.includes('SALES_OFFLINE_ORDERING') && m.permissions.includes('sales.catalog.view')) setSnapshot(await refreshSnapshot(m.userId).catch(() => null));
       },
       logout() {
         // End the session on the server too, so the refresh token is dead even if it was copied.

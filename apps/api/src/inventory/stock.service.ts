@@ -45,11 +45,32 @@ export class StockService {
     return new Decimal(r.avg_cost);
   }
 
+  /**
+   * Goods leave at the till without a reservation (POS). Rows must already be
+   * locked with lock(). Returns the weighted-average unit cost used for COGS.
+   */
+  async issueDirect(
+    tx: Tx,
+    m: { warehouseId: string; productId: string; qtyBase: Decimal; referenceType: string; referenceId: string; userId: string | null; notes?: string },
+  ): Promise<Decimal> {
+    const r = await tx.one<{ avg_cost: string }>(
+      `UPDATE stock_levels SET qty_on_hand = qty_on_hand - $3 WHERE warehouse_id = $1 AND product_id = $2 RETURNING avg_cost`,
+      [m.warehouseId, m.productId, m.qtyBase.toString()],
+    );
+    await this.movement(tx, { ...m, type: 'POS_SALE', qty: m.qtyBase.neg(), unitCost: new Decimal(r.avg_cost) });
+    return new Decimal(r.avg_cost);
+  }
+
   /** Goods come back (undelivered or returned). Optionally re-reserved for the same order. */
   async receiveBack(
     tx: Tx,
-    m: { warehouseId: string; productId: string; qtyBase: Decimal; unitCost: Decimal; reserve: boolean; referenceType: string; referenceId: string; userId: string | null; notes?: string },
+    m: { warehouseId: string; productId: string; qtyBase: Decimal; unitCost: Decimal; reserve: boolean; referenceType: string; referenceId: string; userId: string | null; notes?: string; type?: 'SALE_RETURN' | 'POS_RETURN' },
   ) {
+    await tx.query(
+      `INSERT INTO stock_levels (tenant_id, warehouse_id, product_id) VALUES (current_tenant_id(), $1, $2)
+       ON CONFLICT (warehouse_id, product_id) DO NOTHING`,
+      [m.warehouseId, m.productId],
+    );
     await tx.query(
       `UPDATE stock_levels SET
          avg_cost = CASE WHEN qty_on_hand + $3::numeric <= 0 THEN avg_cost
@@ -59,7 +80,7 @@ export class StockService {
        WHERE warehouse_id = $1 AND product_id = $2`,
       [m.warehouseId, m.productId, m.qtyBase.toString(), m.unitCost.toString(), m.reserve],
     );
-    await this.movement(tx, { ...m, type: 'SALE_RETURN', qty: m.qtyBase, unitCost: m.unitCost });
+    await this.movement(tx, { ...m, type: m.type ?? 'SALE_RETURN', qty: m.qtyBase, unitCost: m.unitCost });
   }
 
   private async movement(

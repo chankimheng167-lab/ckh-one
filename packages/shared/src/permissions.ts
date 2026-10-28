@@ -54,6 +54,25 @@ export const P = {
   SALES_SETTINGS_MANAGE: 'sales.settings.manage',
   // HR & Payroll hand-off
   HR_PAYROLL_MANAGE: 'hr.payroll.manage',
+
+  // POS Sales & Cashier
+  POS_ACCESS: 'pos.access',
+  POS_SALES_CREATE: 'pos.sales.create',
+  POS_SALES_VIEW_ALL: 'pos.sales.view_all',
+  POS_DISCOUNT_APPLY: 'pos.discount.apply',
+  POS_DISCOUNT_OVERRIDE: 'pos.discount.override',
+  POS_PRICE_OVERRIDE: 'pos.price.override',
+  POS_REFUNDS_CREATE: 'pos.refunds.create',
+  POS_RECEIPT_REPRINT: 'pos.receipts.reprint',
+  POS_CASH_DRAWER: 'pos.cash.drawer',
+  POS_SHIFT_CLOSE: 'pos.shift.close',
+  POS_SHIFT_APPROVE: 'pos.shift.approve',
+  POS_PAYMENTS_VERIFY: 'pos.payments.verify',
+  POS_REPORTS_VIEW: 'pos.reports.view',
+  POS_ALL_BRANCHES: 'pos.branches.all',
+  POS_REGISTERS_MANAGE: 'pos.registers.manage',
+  POS_DEVICES_MANAGE: 'pos.devices.manage',
+  POS_SETTINGS_MANAGE: 'pos.settings.manage',
 } as const;
 
 export type PermissionCode = (typeof P)[keyof typeof P];
@@ -148,6 +167,35 @@ export const DEFAULT_ROLES: Record<string, { name: string; permissions: Permissi
       P.SALES_RETURNS_RECEIVE,
     ],
   },
+  POS_CASHIER: {
+    name: 'POS Cashier',
+    permissions: [P.POS_ACCESS, P.POS_SALES_CREATE, P.POS_DISCOUNT_APPLY, P.POS_CASH_DRAWER, P.POS_SHIFT_CLOSE, P.PRODUCTS_VIEW],
+  },
+  POS_SUPERVISOR: {
+    name: 'POS Supervisor',
+    permissions: [
+      P.POS_ACCESS, P.POS_SALES_CREATE, P.POS_SALES_VIEW_ALL, P.POS_DISCOUNT_APPLY, P.POS_DISCOUNT_OVERRIDE, P.POS_PRICE_OVERRIDE,
+      P.POS_REFUNDS_CREATE, P.POS_RECEIPT_REPRINT, P.POS_CASH_DRAWER, P.POS_SHIFT_CLOSE, P.POS_SHIFT_APPROVE, P.POS_PAYMENTS_VERIFY,
+      P.POS_REPORTS_VIEW, P.PRODUCTS_VIEW, P.INVENTORY_VIEW,
+    ],
+  },
+  POS_MANAGER: {
+    name: 'POS Manager',
+    permissions: [
+      P.POS_ACCESS, P.POS_SALES_CREATE, P.POS_SALES_VIEW_ALL, P.POS_DISCOUNT_APPLY, P.POS_DISCOUNT_OVERRIDE, P.POS_PRICE_OVERRIDE,
+      P.POS_REFUNDS_CREATE, P.POS_RECEIPT_REPRINT, P.POS_CASH_DRAWER, P.POS_SHIFT_CLOSE, P.POS_SHIFT_APPROVE, P.POS_PAYMENTS_VERIFY,
+      P.POS_REPORTS_VIEW, P.POS_ALL_BRANCHES, P.POS_REGISTERS_MANAGE, P.POS_DEVICES_MANAGE, P.POS_SETTINGS_MANAGE,
+      P.PRODUCTS_VIEW, P.PRODUCTS_MANAGE, P.INVENTORY_VIEW, P.INVENTORY_ADJUST, P.CUSTOMERS_MANAGE,
+    ],
+  },
+  BRANCH_ADMIN: {
+    name: 'Branch Administrator',
+    permissions: [
+      P.POS_ACCESS, P.POS_SALES_CREATE, P.POS_SALES_VIEW_ALL, P.POS_DISCOUNT_APPLY, P.POS_DISCOUNT_OVERRIDE, P.POS_PRICE_OVERRIDE,
+      P.POS_REFUNDS_CREATE, P.POS_RECEIPT_REPRINT, P.POS_CASH_DRAWER, P.POS_SHIFT_CLOSE, P.POS_SHIFT_APPROVE, P.POS_PAYMENTS_VERIFY,
+      P.POS_REPORTS_VIEW, P.POS_REGISTERS_MANAGE, P.POS_DEVICES_MANAGE, P.PRODUCTS_VIEW, P.INVENTORY_VIEW, P.INVENTORY_ADJUST, P.CUSTOMERS_MANAGE,
+    ],
+  },
   ACCOUNTANT: {
     name: 'Accountant',
     permissions: [
@@ -158,6 +206,9 @@ export const DEFAULT_ROLES: Record<string, { name: string; permissions: Permissi
       P.SALES_INVOICES_CREATE,
       P.SALES_COLLECTIONS_VERIFY,
       P.SALES_REPORTS_VIEW,
+      P.POS_PAYMENTS_VERIFY,
+      P.POS_REPORTS_VIEW,
+      P.POS_SALES_VIEW_ALL,
     ],
   },
 };

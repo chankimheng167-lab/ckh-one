@@ -15,7 +15,7 @@ export function applySecurity(app: INestApplication) {
   app.enableCors({
     origin: cfg.corsOrigins.length ? cfg.corsOrigins : true,
     credentials: false,
-    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Device-Id'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Device-Id', 'X-POS-Device'],
     maxAge: 600,
   });
   const http = app.getHttpAdapter().getInstance();

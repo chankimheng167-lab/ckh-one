@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { P } from '@ckh/shared';
 import { useSession } from '@/lib/session';
@@ -15,6 +16,13 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { href: '/orders/', label: 'My orders', short: 'Orders', icon: '≣', module: 'SALES_ORDER_MANAGEMENT' },
       { href: '/visits/', label: 'Customer visits', short: 'Visits', icon: '⌖', perm: P.SALES_VISITS_MANAGE },
       { href: '/collections/', label: 'Payment collections', icon: '$', anyPerm: [P.SALES_COLLECTIONS_SUBMIT, P.SALES_COLLECTIONS_VERIFY], module: 'ACCOUNTING' },
+    ],
+  },
+  {
+    title: 'Point of sale',
+    items: [
+      { href: '/pos/sell/', label: 'POS checkout', icon: '▣', perm: P.POS_SALES_CREATE, module: 'POS_SALES' },
+      { href: '/pos/', label: 'POS dashboard', icon: '◫', perm: P.POS_ACCESS, module: 'POS_SALES' },
     ],
   },
   {
@@ -76,9 +84,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <div className="row">
           <button className="menu-btn link" aria-label="Menu" onClick={() => setOpen(!open)} style={{ fontSize: 22, color: 'var(--ckh-text)' }}>☰</button>
-          <a href="/" className="brand">
+          <Link href="/" className="brand">
             <span className="logo">C1</span> CKH ONE <span className="muted small" style={{ fontWeight: 400 }}>Sales</span>
-          </a>
+          </Link>
         </div>
         <div className="row small">
           {!s.online && <span className="badge warn">Offline</span>}
