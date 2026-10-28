@@ -79,7 +79,7 @@ export async function seedDemoTenant(tx: Tx, password: string = PUBLIC_DEMO_PASS
   await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenantId]);
   const id = (sql: string, p: unknown[] = []) => tx.one<{ id: string }>(sql, p).then((r) => r.id);
   const pw = await bcrypt.hash(password, 10);
-  const role = (code: string) => id('SELECT id FROM roles WHERE code = $1', [code]);
+  const role = (code: string) => id('SELECT id FROM roles WHERE tenant_id = $1 AND code = $2', [tenantId, code]);
   const user = async (email: string, name: string, roleCode: string) => {
     const uid = await id(`INSERT INTO users (tenant_id, email, password_hash, full_name) VALUES ($1, $2, $3, $4) RETURNING id`, [tenantId, email, pw, name]);
     await tx.query('INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES ($1, $2, $3)', [tenantId, uid, await role(roleCode)]);
@@ -91,8 +91,8 @@ export async function seedDemoTenant(tx: Tx, password: string = PUBLIC_DEMO_PASS
   await user('warehouse@demo.ckh.one', 'Rith Warehouse', 'WAREHOUSE_OFFICER');
   await user('accountant@demo.ckh.one', 'Chenda Accountant', 'ACCOUNTANT');
 
-  const branch = await id(`SELECT id FROM branches WHERE code = 'HQ'`);
-  const wh = await id(`SELECT id FROM warehouses WHERE code = 'MAIN'`);
+  const branch = await id(`SELECT id FROM branches WHERE tenant_id = $1 AND code = 'HQ'`, [tenantId]);
+  const wh = await id(`SELECT id FROM warehouses WHERE tenant_id = $1 AND code = 'MAIN'`, [tenantId]);
   const team = await id(
     `INSERT INTO sales_teams (tenant_id, code, name, supervisor_user_id, manager_user_id, branch_id) VALUES ($1, 'PP', 'Phnom Penh Team', $2, $3, $4) RETURNING id`,
     [tenantId, supervisor, manager, branch],
@@ -101,7 +101,7 @@ export async function seedDemoTenant(tx: Tx, password: string = PUBLIC_DEMO_PASS
     `INSERT INTO sales_representatives (tenant_id, user_id, employee_code, team_id, default_branch_id, default_warehouse_id) VALUES ($1, $2, 'SR001', $3, $4, $5) RETURNING id`,
     [tenantId, repUser, team, branch, wh],
   );
-  const pcs = await id(`SELECT id FROM units WHERE code = 'PCS'`);
+  const pcs = await id(`SELECT id FROM units WHERE tenant_id = $1 AND code = 'PCS'`, [tenantId]);
   const products: [string, string, string][] = [
     ['RICE-25', 'Jasmine Rice 25kg', '28.00'],
     ['OIL-1L', 'Cooking Oil 1L', '2.50'],
@@ -141,20 +141,20 @@ export async function seedDemoPos(tx: Tx, password: string = PUBLIC_DEMO_PASSWOR
      ON CONFLICT (tenant_id, module_code) DO UPDATE SET enabled = true`,
     [tenantId],
   );
-  if (await tx.maybeOne(`SELECT 1 FROM pos_registers WHERE code = 'R1'`)) return;
+  if (await tx.maybeOne(`SELECT 1 FROM pos_registers WHERE tenant_id = $1 AND code = 'R1'`, [tenantId])) return;
   const id = (sql: string, p: unknown[] = []) => tx.one<{ id: string }>(sql, p).then((r) => r.id);
   const pw = await bcrypt.hash(password, 10);
-  const branch = await id(`SELECT id FROM branches WHERE code = 'HQ'`);
-  const wh = await id(`SELECT id FROM warehouses WHERE code = 'MAIN'`);
+  const branch = await id(`SELECT id FROM branches WHERE tenant_id = $1 AND code = 'HQ'`, [tenantId]);
+  const wh = await id(`SELECT id FROM warehouses WHERE tenant_id = $1 AND code = 'MAIN'`, [tenantId]);
   const user = async (email: string, name: string, roleCode: string, pin?: string) => {
-    const existing = await tx.maybeOne<{ id: string }>('SELECT id FROM users WHERE email = $1', [email]);
+    const existing = await tx.maybeOne<{ id: string }>('SELECT id FROM users WHERE tenant_id = $1 AND email = $2', [tenantId, email]);
     const uid =
       existing?.id ??
       (await id(`INSERT INTO users (tenant_id, email, password_hash, full_name, pos_pin_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id`, [
         tenantId, email, pw, name, pin ? await bcrypt.hash(pin, 10) : null,
       ]));
     await tx.query(
-      `INSERT INTO user_roles (tenant_id, user_id, role_id) SELECT $1, $2, id FROM roles WHERE code = $3 ON CONFLICT DO NOTHING`,
+      `INSERT INTO user_roles (tenant_id, user_id, role_id) SELECT $1, $2, id FROM roles WHERE tenant_id = $1 AND code = $3 ON CONFLICT DO NOTHING`,
       [tenantId, uid, roleCode],
     );
     await tx.query(`INSERT INTO pos_staff_branches (tenant_id, user_id, branch_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [tenantId, uid, branch]);
@@ -168,9 +168,9 @@ export async function seedDemoPos(tx: Tx, password: string = PUBLIC_DEMO_PASSWOR
     [tenantId, branch, wh],
   );
 
-  const pcs = await id(`SELECT id FROM units WHERE code = 'PCS'`);
+  const pcs = await id(`SELECT id FROM units WHERE tenant_id = $1 AND code = 'PCS'`, [tenantId]);
   const cat = async (code: string, name: string) =>
-    (await tx.maybeOne<{ id: string }>('SELECT id FROM product_categories WHERE code = $1', [code]))?.id ??
+    (await tx.maybeOne<{ id: string }>('SELECT id FROM product_categories WHERE tenant_id = $1 AND code = $2', [tenantId, code]))?.id ??
     id(`INSERT INTO product_categories (tenant_id, code, name) VALUES ($1, $2, $3) RETURNING id`, [tenantId, code, name]);
   const grocery = await cat('GROCERY', 'Grocery');
   const drinks = await cat('DRINKS', 'Drinks');
@@ -178,7 +178,7 @@ export async function seedDemoPos(tx: Tx, password: string = PUBLIC_DEMO_PASSWOR
   const phones = await cat('PHONES', 'Phones');
   // Barcodes and categories on the existing demo products.
   for (const [sku, barcode, c] of [['RICE-25', '8850001000017', grocery], ['OIL-1L', '8850001000024', grocery], ['SUGAR-1', '8850001000031', grocery], ['WATER-24', '8850001000048', drinks]]) {
-    await tx.query(`UPDATE products SET barcode = COALESCE(barcode, $2), category_id = COALESCE(category_id, $3), reorder_point = COALESCE(reorder_point, 20) WHERE sku = $1`, [sku, barcode, c]);
+    await tx.query(`UPDATE products SET barcode = COALESCE(barcode, $2), category_id = COALESCE(category_id, $3), reorder_point = COALESCE(reorder_point, 20) WHERE tenant_id = $4 AND sku = $1`, [sku, barcode, c, tenantId]);
   }
   const product = async (sku: string, name: string, price: string, extra: { barcode?: string; category: string; parent?: string; attrs?: object; serial?: boolean; stock?: number }) => {
     const p = await id(
